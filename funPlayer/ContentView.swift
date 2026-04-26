@@ -105,6 +105,8 @@ struct ContentView: View {
             FullScreenPlayer()
         }
         .popupBarStyle(.floating)
+        .popupBarBackgroundEffect(nil)
+        .popupCloseButtonStyle(.none)
         .popupBarCustomView(wantsDefaultTapGesture: true, wantsDefaultPanGesture: true, wantsDefaultHighlightGesture: true) {
             PopupBarView()
         }
