@@ -50,6 +50,9 @@ struct CombinedLibraryView: View {
         }
         .listStyle(.plain)
         .navigationTitle("媒体库")
+        .refreshable {
+            await loadCombinedItems()
+        }
         .task {
             client.serverConfig = server
             await loadCombinedItems()
@@ -117,15 +120,23 @@ struct LibraryView: View {
         }
         .listStyle(.plain)
         .navigationTitle(server.name)
+        .refreshable {
+            await loadLibraryItems()
+        }
         .task {
             client.serverConfig = server
-            do {
-                items = try await client.getViews()
-                isLoading = false
-            } catch {
-                isLoading = false
-            }
+            await loadLibraryItems()
         }
+    }
+
+    private func loadLibraryItems() async {
+        isLoading = true
+        do {
+            items = try await client.getViews()
+        } catch {
+            print("[LibraryView] Error loading items: \(error)")
+        }
+        isLoading = false
     }
 }
 
@@ -356,24 +367,32 @@ struct FolderView: View {
         }
         .listStyle(.plain)
         .navigationTitle(title)
+        .refreshable {
+            await loadFolderItems()
+        }
         .task {
             client.serverConfig = server
-            do {
-                let item = try await client.getItem(itemId: parentId)
-                if item.collectionType == "tvshows" {
-                    items = try await client.getItems(parentId: parentId, recursive: true, includeItemTypes: "Series")
-                } else if item.collectionType == "movies" {
-                    items = try await client.getItems(parentId: parentId, recursive: true, includeItemTypes: "Movie")
-                } else if item.collectionType == "music" {
-                    items = try await client.getItems(parentId: parentId, recursive: true, includeItemTypes: "MusicAlbum")
-                } else {
-                    items = try await client.getItems(parentId: parentId)
-                }
-                isLoading = false
-            } catch {
-                isLoading = false
-            }
+            await loadFolderItems()
         }
+    }
+
+    private func loadFolderItems() async {
+        isLoading = true
+        do {
+            let item = try await client.getItem(itemId: parentId)
+            if item.collectionType == "tvshows" {
+                items = try await client.getItems(parentId: parentId, recursive: true, includeItemTypes: "Series")
+            } else if item.collectionType == "movies" {
+                items = try await client.getItems(parentId: parentId, recursive: true, includeItemTypes: "Movie")
+            } else if item.collectionType == "music" {
+                items = try await client.getItems(parentId: parentId, recursive: true, includeItemTypes: "MusicAlbum")
+            } else {
+                items = try await client.getItems(parentId: parentId)
+            }
+        } catch {
+            print("[FolderView] Error loading items: \(error)")
+        }
+        isLoading = false
     }
 }
 
@@ -405,15 +424,23 @@ struct SeasonView: View {
         }
         .listStyle(.plain)
         .navigationTitle(title)
+        .refreshable {
+            await loadSeasonItems()
+        }
         .task {
             client.serverConfig = server
-            do {
-                items = try await client.getItems(parentId: seriesId, includeItemTypes: "Season")
-                isLoading = false
-            } catch {
-                isLoading = false
-            }
+            await loadSeasonItems()
         }
+    }
+
+    private func loadSeasonItems() async {
+        isLoading = true
+        do {
+            items = try await client.getItems(parentId: seriesId, includeItemTypes: "Season")
+        } catch {
+            print("[SeasonView] Error loading items: \(error)")
+        }
+        isLoading = false
     }
 }
 
@@ -450,15 +477,23 @@ struct EpisodeListView: View {
         }
         .listStyle(.plain)
         .navigationTitle(title)
+        .refreshable {
+            await loadEpisodeItems()
+        }
         .task {
             client.serverConfig = server
-            do {
-                items = try await client.getItems(parentId: seasonId, includeItemTypes: "Episode", sortBy: "IndexNumber")
-                isLoading = false
-            } catch {
-                isLoading = false
-            }
+            await loadEpisodeItems()
         }
+    }
+
+    private func loadEpisodeItems() async {
+        isLoading = true
+        do {
+            items = try await client.getItems(parentId: seasonId, includeItemTypes: "Episode", sortBy: "IndexNumber")
+        } catch {
+            print("[EpisodeListView] Error loading items: \(error)")
+        }
+        isLoading = false
     }
 }
 
@@ -496,20 +531,28 @@ struct AlbumTrackListView: View {
                             .padding(.bottom, bottomInset + 20)
                     }
                 }
+                .refreshable {
+                    await loadAlbumTracks()
+                }
                 .ignoresSafeArea(edges: .top)
             }
         }
         .task {
             client.serverConfig = server
-            do {
-                albumItem = try await client.getItem(itemId: albumId)
-                items = try await client.getItems(parentId: albumId, includeItemTypes: "Audio", sortBy: "ParentIndexNumber,IndexNumber")
-                await loadAccentColor()
-                isLoading = false
-            } catch {
-                isLoading = false
-            }
+            await loadAlbumTracks()
         }
+    }
+
+    private func loadAlbumTracks() async {
+        isLoading = true
+        do {
+            albumItem = try await client.getItem(itemId: albumId)
+            items = try await client.getItems(parentId: albumId, includeItemTypes: "Audio", sortBy: "ParentIndexNumber,IndexNumber")
+            await loadAccentColor()
+        } catch {
+            print("[AlbumTrackListView] Error loading items: \(error)")
+        }
+        isLoading = false
     }
 
     @ViewBuilder
