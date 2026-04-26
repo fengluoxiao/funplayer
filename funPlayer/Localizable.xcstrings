@@ -12,6 +12,9 @@
         }
       }
     },
+    "%lld" : {
+
+    },
     "Account" : {
       "localizations" : {
         "zh-Hans" : {
@@ -75,6 +78,7 @@
       }
     },
     "Connect to your Jellyfin server to start enjoying your media library." : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -95,6 +99,7 @@
       }
     },
     "Home" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -127,6 +132,7 @@
       }
     },
     "Library" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -137,6 +143,7 @@
       }
     },
     "Media Libraries" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -157,6 +164,7 @@
       }
     },
     "No Content" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -188,6 +196,7 @@
       }
     },
     "No Library Selected" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -198,6 +207,7 @@
       }
     },
     "No server selected" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -208,6 +218,7 @@
       }
     },
     "No Server Selected" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -239,6 +250,7 @@
       }
     },
     "Please select a library in Settings" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -249,6 +261,7 @@
       }
     },
     "Please select a server in Settings" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -259,6 +272,7 @@
       }
     },
     "Recently Added" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -269,6 +283,7 @@
       }
     },
     "Recently Played" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -299,6 +314,7 @@
       }
     },
     "Selected Media Libraries" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -309,6 +325,7 @@
       }
     },
     "Selected Server" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -339,6 +356,7 @@
       }
     },
     "Servers" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -349,6 +367,7 @@
       }
     },
     "Settings" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -359,6 +378,7 @@
       }
     },
     "Start playing or add media to your server" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -380,6 +400,7 @@
       }
     },
     "Unknown" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -400,6 +421,7 @@
       }
     },
     "Welcome to funPlayer" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -408,6 +430,75 @@
           }
         }
       }
+    },
+    "主页" : {
+
+    },
+    "最近添加" : {
+
+    },
+    "媒体库" : {
+
+    },
+    "已选媒体库" : {
+
+    },
+    "开始播放或向服务器添加媒体" : {
+
+    },
+    "当前服务器" : {
+
+    },
+    "您的库中没有%@。" : {
+
+    },
+    "服务器列表" : {
+
+    },
+    "未知" : {
+
+    },
+    "未选择媒体库" : {
+
+    },
+    "未选择服务器" : {
+
+    },
+    "欢迎使用 funPlayer" : {
+
+    },
+    "没有%@" : {
+
+    },
+    "没有专辑" : {
+
+    },
+    "没有内容" : {
+
+    },
+    "没有可用的媒体库" : {
+
+    },
+    "添加服务器" : {
+
+    },
+    "设置" : {
+
+    },
+    "该艺人没有专辑。" : {
+
+    },
+    "请在设置中选择媒体库" : {
+
+    },
+    "请在设置中选择服务器" : {
+
+    },
+    "资料库" : {
+
+    },
+    "连接到你的 Jellyfin 服务器，开始享受你的媒体库。" : {
+
     }
   },
   "version" : "1.0"

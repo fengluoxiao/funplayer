@@ -50,6 +50,12 @@ struct FullScreenPlayer: View {
             .first?.windows.first?.safeAreaInsets.bottom ?? 0
     }
 
+    private var screenBounds: CGRect {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first?.screen.bounds ?? .zero
+    }
+
     @ViewBuilder
     private func controlPanel() -> some View {
         VStack(spacing: 20) {
@@ -64,7 +70,7 @@ struct FullScreenPlayer: View {
     @ViewBuilder
     private func songInfoView() -> some View {
         VStack(spacing: 8) {
-            Text(player.currentItem?.name ?? "Unknown")
+            Text(player.currentItem?.name ?? "未知")
                 .font(.title2.bold())
                 .foregroundStyle(accentColor)
                 .lineLimit(1)
@@ -163,9 +169,16 @@ struct FullScreenPlayer: View {
     @ViewBuilder
     private func extraControlsView() -> some View {
         HStack(spacing: 0) {
-            RoutePickerView(tintColor: UIColor(player.accentColor))
-                .frame(width: 20, height: 20)
-                .frame(maxWidth: .infinity)
+            ZStack {
+                RoutePickerView(tintColor: UIColor(player.accentColor))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 44)
+                Image(systemName: "airplayaudio")
+                    .font(.system(size: 20))
+                    .foregroundStyle(accentColor)
+                    .allowsHitTesting(false)
+            }
+            .frame(maxWidth: .infinity)
             Button { player.toggleShuffleMode() } label: {
                 Image(systemName: "shuffle")
                     .font(.system(size: 20))
@@ -203,12 +216,12 @@ struct FullScreenPlayer: View {
 
     @ViewBuilder
     private func artworkView() -> some View {
-        let w = UIScreen.main.bounds.width
+        let w = screenBounds.width
         Group {
             if let url = artworkURL() {
                 AsyncImage(url: url) { phase in
                     if let image = phase.image {
-                        image.resizable().aspectRatio(contentMode: .fit)
+                        image.resizable().aspectRatio(contentMode: .fill)
                     } else {
                         placeholder(width: w)
                     }
@@ -217,7 +230,7 @@ struct FullScreenPlayer: View {
                 placeholder(width: w)
             }
         }
-        .frame(width: w, height: w)
+        .frame(width: w, height: w + 22)
         .clipped()
     }
 
@@ -234,8 +247,8 @@ struct FullScreenPlayer: View {
 
     @ViewBuilder
     private func backgroundView() -> some View {
-        let w = UIScreen.main.bounds.width
-        let h = UIScreen.main.bounds.height
+        let w = screenBounds.width
+        let h = screenBounds.height
         Group {
             if let url = artworkURL() {
                 AsyncImage(url: url) { phase in
@@ -245,7 +258,8 @@ struct FullScreenPlayer: View {
                             .aspectRatio(contentMode: .fill)
                             .frame(width: w, height: h)
                             .clipped()
-                            .blur(radius: 80)
+                            .blur(radius: 60)
+                            .overlay(Color.white.opacity(0.7))
                     } else {
                         Color.white
                     }
@@ -255,13 +269,6 @@ struct FullScreenPlayer: View {
             }
         }
         .ignoresSafeArea()
-        .overlay(
-            GaussianBlurView(radius: 60)
-                .overlay(
-                    Color.white.opacity(0.7)
-                        .overlay(accentColor.opacity(0.2))
-                )
-        )
     }
 
     private func artworkURL() -> URL? {
@@ -288,6 +295,23 @@ struct FullScreenPlayer: View {
     }
 }
 
+struct RoutePickerView: UIViewRepresentable {
+    var tintColor: UIColor = .white
+
+    func makeUIView(context: Context) -> AVRoutePickerView {
+        let picker = AVRoutePickerView()
+        picker.activeTintColor = tintColor
+        picker.tintColor = tintColor
+        picker.backgroundColor = .clear
+        return picker
+    }
+
+    func updateUIView(_ uiView: AVRoutePickerView, context: Context) {
+        uiView.activeTintColor = tintColor
+        uiView.tintColor = tintColor
+    }
+}
+
 struct VolumeSlider: UIViewRepresentable {
     var tintColor: UIColor = .white
 
@@ -310,65 +334,6 @@ struct VolumeSlider: UIViewRepresentable {
             slider.maximumTrackTintColor = tintColor.withAlphaComponent(0.3)
             slider.thumbTintColor = tintColor
         }
-    }
-}
-
-struct GaussianBlurView: UIViewRepresentable {
-    var radius: CGFloat
-
-    func makeUIView(context: Context) -> UIView {
-        let container = UIView()
-        container.backgroundColor = .clear
-        return container
-    }
-
-    func updateUIView(_ uiView: UIView, context: Context) {
-        uiView.layer.sublayers?.removeAll(where: { $0 is BlurLayer })
-
-        let blurLayer = BlurLayer()
-        blurLayer.frame = uiView.bounds
-        blurLayer.radius = radius
-        blurLayer.setNeedsDisplay()
-        uiView.layer.addSublayer(blurLayer)
-    }
-}
-
-class BlurLayer: CALayer {
-    var radius: CGFloat = 0
-
-    override func draw(in ctx: CGContext) {
-        guard let image = UIGraphicsGetImageFromCurrentImageContext(),
-              let cgImage = image.cgImage else { return }
-
-        let ciImage = CIImage(cgImage: cgImage)
-        let filter = CIFilter(name: "CIGaussianBlur")
-        filter?.setValue(ciImage, forKey: kCIInputImageKey)
-        filter?.setValue(radius, forKey: kCIInputRadiusKey)
-
-        guard let output = filter?.outputImage else { return }
-        let rect = CGRect(x: 0, y: 0, width: bounds.width, height: bounds.height)
-
-        let context = CIContext(options: nil)
-        guard let cgOutput = context.createCGImage(output, from: rect) else { return }
-
-        ctx.draw(cgOutput, in: rect)
-    }
-}
-
-struct RoutePickerView: UIViewRepresentable {
-    var tintColor: UIColor = .white
-
-    func makeUIView(context: Context) -> AVRoutePickerView {
-        let routePickerView = AVRoutePickerView()
-        routePickerView.tintColor = tintColor
-        routePickerView.activeTintColor = tintColor
-        routePickerView.backgroundColor = .clear
-        return routePickerView
-    }
-
-    func updateUIView(_ uiView: AVRoutePickerView, context: Context) {
-        uiView.tintColor = tintColor
-        uiView.activeTintColor = tintColor
     }
 }
 

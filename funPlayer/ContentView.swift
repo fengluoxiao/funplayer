@@ -55,7 +55,7 @@ struct ContentView: View {
                 HomeTabView()
             }
             .tabItem {
-                Label("Home", systemImage: "house.fill")
+                Label("主页", systemImage: "house.fill")
             }
             .tag(0)
 
@@ -63,7 +63,7 @@ struct ContentView: View {
                 LibraryTabView()
             }
             .tabItem {
-                Label("Library", systemImage: "square.stack.fill")
+                Label("资料库", systemImage: "square.stack.fill")
             }
             .tag(1)
 
@@ -71,7 +71,7 @@ struct ContentView: View {
                 SettingsTabView(showAddServer: $showAddServer)
             }
             .tabItem {
-                Label("Settings", systemImage: "gear")
+                Label("设置", systemImage: "gear")
             }
             .tag(2)
         }
@@ -84,7 +84,7 @@ struct ContentView: View {
     }
 }
 
-// MARK: - Welcome View (First Launch)
+// MARK: - 欢迎页面（首次启动）
 
 struct WelcomeView: View {
     @Binding var showAddServer: Bool
@@ -97,10 +97,10 @@ struct WelcomeView: View {
                 .font(.system(size: 80))
                 .foregroundStyle(.secondary)
 
-            Text("Welcome to funPlayer")
+            Text("欢迎使用 funPlayer")
                 .font(.largeTitle.bold())
 
-            Text("Connect to your Jellyfin server to start enjoying your media library.")
+            Text("连接到你的 Jellyfin 服务器，开始享受你的媒体库。")
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -109,7 +109,7 @@ struct WelcomeView: View {
             Button {
                 showAddServer = true
             } label: {
-                Text("Add Server")
+                Text("添加服务器")
                     .font(.headline)
                     .frame(maxWidth: .infinity)
                     .padding()
@@ -124,7 +124,7 @@ struct WelcomeView: View {
     }
 }
 
-// MARK: - Home Tab
+// MARK: - 主页页签
 
 struct HomeTabView: View {
     @StateObject private var appState = AppState.shared
@@ -138,9 +138,9 @@ struct HomeTabView: View {
             VStack(alignment: .leading, spacing: 24) {
                 if appState.selectedServer == nil {
                     ContentUnavailableView(
-                        String(localized: "No Server Selected"),
+                        "未选择服务器",
                         systemImage: "server.rack",
-                        description: Text(String(localized: "Please select a server in Settings"))
+                        description: Text("请在设置中选择服务器")
                     )
                     .padding(.top, 40)
                 } else if isLoading {
@@ -152,18 +152,18 @@ struct HomeTabView: View {
                     .padding(.top, 40)
                 } else {
                     if !recentlyPlayed.isEmpty {
-                        homeSection(title: String(localized: "Recently Played"), items: recentlyPlayed)
+                        homeSection(title: "最近播放", items: recentlyPlayed)
                     }
 
                     if !recentlyAdded.isEmpty {
-                        homeSection(title: String(localized: "Recently Added"), items: recentlyAdded)
+                        homeSection(title: "最近添加", items: recentlyAdded)
                     }
 
                     if recentlyPlayed.isEmpty && recentlyAdded.isEmpty {
                         ContentUnavailableView(
-                            String(localized: "No Content"),
+                            "没有内容",
                             systemImage: "music.note.house",
-                            description: Text(String(localized: "Start playing or add media to your server"))
+                            description: Text("开始播放或向服务器添加媒体")
                         )
                         .padding(.top, 40)
                     }
@@ -171,7 +171,7 @@ struct HomeTabView: View {
             }
             .padding(.vertical, 16)
         }
-        .navigationTitle(String(localized: "Home"))
+        .navigationTitle("主页")
         .task {
             await loadData()
         }
@@ -306,92 +306,220 @@ struct HomeItemCard: View {
     }
 }
 
-// MARK: - Library Tab
+// MARK: - Library Tab (Apple Music Style)
+
+enum LibraryCategory: String, CaseIterable, Identifiable {
+    case playlists = "播放列表"
+    case artists = "艺人"
+    case albums = "专辑"
+    case songs = "歌曲"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .playlists: return "music.note.list"
+        case .artists: return "music.mic"
+        case .albums: return "square.stack"
+        case .songs: return "music.note"
+        }
+    }
+
+    var iconColor: Color {
+        return Color.accentColor
+    }
+}
 
 struct LibraryTabView: View {
     @StateObject private var appState = AppState.shared
     @StateObject private var client = JellyfinClient()
-    @State private var items: [BaseItemDto] = []
+    @State private var albums: [BaseItemDto] = []
+    @State private var artists: [BaseItemDto] = []
+    @State private var songs: [BaseItemDto] = []
     @State private var isLoading = true
 
     var body: some View {
         Group {
             if appState.selectedServer == nil {
                 ContentUnavailableView(
-                    String(localized: "No Server Selected"),
+                    "未选择服务器",
                     systemImage: "server.rack",
-                    description: Text(String(localized: "Please select a server in Settings"))
+                    description: Text("请在设置中选择服务器")
                 )
             } else if appState.selectedLibraryIds.isEmpty {
                 ContentUnavailableView(
-                    String(localized: "No Library Selected"),
+                    "未选择媒体库",
                     systemImage: "square.stack",
-                    description: Text(String(localized: "Please select a library in Settings"))
+                    description: Text("请在设置中选择媒体库")
                 )
-            } else if isLoading && items.isEmpty {
-                ProgressView()
             } else {
-                libraryContentList
+                libraryContent
             }
         }
-        .navigationTitle(String(localized: "Library"))
         .task {
-            await loadCombinedItems()
+            await loadLibraryData()
+        }
+        .onChange(of: appState.selectedServer) {
+            Task {
+                await loadLibraryData()
+            }
+        }
+        .onChange(of: appState.selectedLibraryIds) {
+            Task {
+                await loadLibraryData()
+            }
         }
     }
 
-    private var libraryContentList: some View {
-        List {
-            ForEach(items) { item in
-                if item.type == "Series" {
-                    NavigationLink(destination: SeasonView(server: appState.selectedServer!, seriesId: item.id, title: item.name ?? "Series")) {
-                        MediaRow(item: item, client: client)
+    private var libraryContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                if isLoading && albums.isEmpty && artists.isEmpty && songs.isEmpty {
+                    HStack {
+                        Spacer()
+                        ProgressView()
+                        Spacer()
                     }
-                } else if item.type == "Season" {
-                    NavigationLink(destination: EpisodeListView(server: appState.selectedServer!, seasonId: item.id, title: item.name ?? "Season")) {
-                        MediaRow(item: item, client: client)
-                    }
-                } else if item.type == "MusicAlbum" {
-                    NavigationLink(destination: AlbumTrackListView(server: appState.selectedServer!, albumId: item.id, title: item.name ?? "Album")) {
-                        MediaRow(item: item, client: client)
-                    }
+                    .padding(.top, 40)
                 } else {
-                    Button {
-                        PlayerManager.shared.playSingle(item: item, server: appState.selectedServer!)
-                    } label: {
-                        MediaRow(item: item, client: client)
+                    // Category List (Apple Music Style)
+                    VStack(spacing: 0) {
+                        ForEach(LibraryCategory.allCases) { category in
+                            NavigationLink(value: category) {
+                                LibraryCategoryRow(category: category, count: countForCategory(category))
+                            }
+
+                            if category != LibraryCategory.allCases.last {
+                                Divider()
+                                    .padding(.leading, 56)
+                            }
+                        }
                     }
-                    .buttonStyle(.plain)
+                    .padding(.horizontal, 16)
+
+                    // Recently Added Section (Albums)
+                    if !albums.isEmpty {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("最近添加")
+                                .font(.title2.bold())
+                                .padding(.horizontal, 16)
+                                .padding(.top, 24)
+
+                            ScrollView(.vertical, showsIndicators: false) {
+                                LazyVGrid(columns: [GridItem(.flexible(), spacing: 16), GridItem(.flexible(), spacing: 16)], spacing: 16) {
+                                    ForEach(albums.prefix(10)) { item in
+                                        LibraryAlbumCard(item: item, client: client)
+                                    }
+                                }
+                                .padding(.horizontal, 16)
+                            }
+                        }
+                    }
                 }
             }
+            .padding(.bottom, 24)
         }
-        .listStyle(.plain)
+        .navigationTitle("资料库")
+        .navigationBarTitleDisplayMode(.large)
+        .navigationDestination(for: LibraryCategory.self) { category in
+            LibraryCategoryView(
+                category: category,
+                server: appState.selectedServer!,
+                items: itemsForCategory(category)
+            )
+        }
     }
 
-    private func loadCombinedItems() async {
+    private func itemsForCategory(_ category: LibraryCategory) -> [BaseItemDto] {
+        switch category {
+        case .playlists:
+            return []
+        case .artists:
+            return artists
+        case .albums:
+            return albums
+        case .songs:
+            return songs
+        }
+    }
+
+    private func countForCategory(_ category: LibraryCategory) -> Int {
+        itemsForCategory(category).count
+    }
+
+    private func loadLibraryData() async {
         guard let server = appState.selectedServer, server.isAuthenticated else {
             isLoading = false
             return
         }
         client.serverConfig = server
         isLoading = true
-        var allItems: [BaseItemDto] = []
+
+        var allAlbums: [BaseItemDto] = []
+        var allArtists: [BaseItemDto] = []
+        var allSongs: [BaseItemDto] = []
+
         do {
             for libraryId in appState.selectedLibraryIds {
                 let library = try await client.getItem(itemId: libraryId)
-                let libraryItems: [BaseItemDto]
-                if library.collectionType == "tvshows" {
-                    libraryItems = try await client.getItems(parentId: libraryId, recursive: true, includeItemTypes: "Series")
+
+                if library.collectionType == "music" {
+                    // Load albums
+                    async let albumItems = client.getItems(
+                        parentId: libraryId,
+                        recursive: true,
+                        includeItemTypes: "MusicAlbum",
+                        sortBy: "SortName"
+                    )
+                    // Load artists
+                    async let artistItems = client.getItems(
+                        parentId: libraryId,
+                        recursive: true,
+                        includeItemTypes: "MusicArtist",
+                        sortBy: "SortName"
+                    )
+                    // Load songs
+                    async let songItems = client.getItems(
+                        parentId: libraryId,
+                        recursive: true,
+                        includeItemTypes: "Audio",
+                        sortBy: "SortName"
+                    )
+
+                    let albumsResult = try await albumItems
+                    let artistsResult = try await artistItems
+                    let songsResult = try await songItems
+
+                    allAlbums.append(contentsOf: albumsResult)
+                    allArtists.append(contentsOf: artistsResult)
+                    allSongs.append(contentsOf: songsResult)
+                } else if library.collectionType == "tvshows" {
+                    async let seriesItems = client.getItems(
+                        parentId: libraryId,
+                        recursive: true,
+                        includeItemTypes: "Series",
+                        sortBy: "SortName"
+                    )
+                    let seriesResult = try await seriesItems
+                    allSongs.append(contentsOf: seriesResult)
                 } else if library.collectionType == "movies" {
-                    libraryItems = try await client.getItems(parentId: libraryId, recursive: true, includeItemTypes: "Movie")
-                } else if library.collectionType == "music" {
-                    libraryItems = try await client.getItems(parentId: libraryId, recursive: true, includeItemTypes: "MusicAlbum")
+                    async let movieItems = client.getItems(
+                        parentId: libraryId,
+                        recursive: true,
+                        includeItemTypes: "Movie",
+                        sortBy: "SortName"
+                    )
+                    let movieResult = try await movieItems
+                    allSongs.append(contentsOf: movieResult)
                 } else {
-                    libraryItems = try await client.getItems(parentId: libraryId)
+                    let otherItems = try await client.getItems(parentId: libraryId)
+                    allSongs.append(contentsOf: otherItems)
                 }
-                allItems.append(contentsOf: libraryItems)
             }
-            items = allItems
+
+            albums = allAlbums
+            artists = allArtists
+            songs = allSongs
         } catch {
             print("[LibraryTabView] Error loading items: \(error)")
         }
@@ -399,7 +527,271 @@ struct LibraryTabView: View {
     }
 }
 
-// MARK: - Settings Tab
+struct LibraryCategoryRow: View {
+    let category: LibraryCategory
+    let count: Int
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: category.icon)
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(category.iconColor)
+                .frame(width: 32, height: 32)
+
+            Text(category.rawValue)
+                .font(.system(size: 18, weight: .medium))
+
+            Spacer()
+
+            if count > 0 {
+                Text("\(count)")
+                    .font(.system(size: 17))
+            }
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 14, weight: .semibold))
+        }
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
+    }
+}
+
+struct LibraryAlbumCard: View {
+    let item: BaseItemDto
+    let client: JellyfinClient
+    @StateObject private var player = PlayerManager.shared
+
+    var body: some View {
+        Button {
+            playItem()
+        } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                AsyncImage(url: client.imageURL(itemId: item.id, maxWidth: 300)) { phase in
+                    if let image = phase.image {
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    } else if phase.error != nil {
+                        Color.gray.opacity(0.3)
+                    } else {
+                        Color.gray.opacity(0.15)
+                    }
+                }
+                .frame(width: 160, height: 160)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                Text(item.name ?? "Unknown")
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
+                    .frame(width: 160, alignment: .leading)
+
+                if let artist = item.albumArtist ?? item.artists?.first ?? item.seriesName {
+                    Text(artist)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .frame(width: 160, alignment: .leading)
+                } else {
+                    Text(item.type ?? "")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .frame(width: 160, alignment: .leading)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func playItem() {
+        guard let server = client.serverConfig else { return }
+        if item.type == "MusicAlbum" {
+            Task {
+                do {
+                    let tracks = try await client.getItems(
+                        parentId: item.id,
+                        includeItemTypes: "Audio",
+                        sortBy: "ParentIndexNumber,IndexNumber"
+                    )
+                    if let first = tracks.first, let index = tracks.firstIndex(where: { $0.id == first.id }) {
+                        player.play(queue: tracks, index: index, server: server)
+                    }
+                } catch {
+                    print("[LibraryAlbumCard] Error loading album tracks: \(error)")
+                }
+            }
+        } else {
+            player.playSingle(item: item, server: server)
+        }
+    }
+}
+
+struct LibraryCategoryView: View {
+    let category: LibraryCategory
+    let server: ServerConfig
+    let items: [BaseItemDto]
+
+    var body: some View {
+        Group {
+            if items.isEmpty {
+                ContentUnavailableView(
+                    "没有\(category.rawValue)",
+                    systemImage: category.icon,
+                    description: Text("您的库中没有\(category.rawValue)。")
+                )
+            } else if category == .albums {
+                // Apple Music Style Album List
+                albumListView
+            } else if category == .artists {
+                // Apple Music Style Artist List
+                artistListView
+            } else {
+                List {
+                    ForEach(items) { item in
+                        if item.type == "Series" {
+                            NavigationLink(destination: SeasonView(server: server, seriesId: item.id, title: item.name ?? "剧集")) {
+                                MediaRow(item: item, client: makeClient())
+                            }
+                        } else if item.type == "Season" {
+                            NavigationLink(destination: EpisodeListView(server: server, seasonId: item.id, title: item.name ?? "季")) {
+                                MediaRow(item: item, client: makeClient())
+                            }
+                        } else if item.type == "MusicAlbum" {
+                            NavigationLink(destination: AlbumTrackListView(server: server, albumId: item.id, title: item.name ?? "专辑")) {
+                                MediaRow(item: item, client: makeClient())
+                            }
+                        } else if item.type == "MusicArtist" {
+                            NavigationLink(destination: ArtistAlbumsView(server: server, artistId: item.id, artistName: item.name ?? "艺人")) {
+                                MediaRow(item: item, client: makeClient())
+                            }
+                        } else {
+                            Button {
+                                PlayerManager.shared.playSingle(item: item, server: server)
+                            } label: {
+                                MediaRow(item: item, client: makeClient())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .listStyle(.plain)
+            }
+        }
+        .navigationTitle(category.rawValue)
+    }
+
+    private func makeClient() -> JellyfinClient {
+        let client = JellyfinClient()
+        client.serverConfig = server
+        return client
+    }
+
+    private var albumListView: some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                    NavigationLink(destination: AlbumTrackListView(server: server, albumId: item.id, title: item.name ?? "专辑")) {
+                        AlbumListRow(item: item, server: server)
+                    }
+                    .buttonStyle(.plain)
+
+                    if index < items.count - 1 {
+                        Divider()
+                            .padding(.leading, 84)
+                    }
+                }
+            }
+            .padding(.vertical, 8)
+        }
+    }
+
+    private var artistListView: some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                    NavigationLink(destination: ArtistAlbumsView(server: server, artistId: item.id, artistName: item.name ?? "艺人")) {
+                        ArtistListRow(item: item, server: server)
+                    }
+                    .buttonStyle(.plain)
+
+                    if index < items.count - 1 {
+                        Divider()
+                            .padding(.leading, 84)
+                    }
+                }
+            }
+            .padding(.vertical, 8)
+        }
+    }
+}
+
+struct ArtistAlbumsView: View {
+    let server: ServerConfig
+    let artistId: String
+    let artistName: String
+    @State private var albums: [BaseItemDto] = []
+    @State private var isLoading = true
+
+    var body: some View {
+        Group {
+            if isLoading {
+                HStack {
+                    Spacer()
+                    ProgressView()
+                    Spacer()
+                }
+                .padding(.top, 40)
+            } else if albums.isEmpty {
+                ContentUnavailableView(
+                    "没有专辑",
+                    systemImage: "square.stack",
+                    description: Text("该艺人没有专辑。")
+                )
+            } else {
+                // Apple Music Style Album List
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(Array(albums.enumerated()), id: \.element.id) { index, item in
+                            NavigationLink(destination: AlbumTrackListView(server: server, albumId: item.id, title: item.name ?? "专辑")) {
+                                AlbumListRow(item: item, server: server)
+                            }
+                            .buttonStyle(.plain)
+
+                            if index < albums.count - 1 {
+                                Divider()
+                                    .padding(.leading, 84)
+                            }
+                        }
+                    }
+                    .padding(.vertical, 8)
+                }
+            }
+        }
+        .navigationTitle(artistName)
+        .task {
+            await loadAlbums()
+        }
+    }
+
+    private func loadAlbums() async {
+        isLoading = true
+        let client = JellyfinClient()
+        client.serverConfig = server
+        do {
+            albums = try await client.getItems(
+                parentId: artistId,
+                recursive: true,
+                includeItemTypes: "MusicAlbum",
+                sortBy: "ProductionYear,SortName"
+            )
+        } catch {
+            print("[ArtistAlbumsView] Error loading albums: \(error)")
+        }
+        isLoading = false
+    }
+}
+
+// MARK: - 设置页签
 
 struct SettingsTabView: View {
     @Binding var showAddServer: Bool
@@ -412,7 +804,7 @@ struct SettingsTabView: View {
 
     var body: some View {
         List {
-            Section(String(localized: "Selected Server")) {
+            Section(String(localized: "当前服务器")) {
                 if let selected = appState.selectedServer {
                     HStack(spacing: 16) {
                         ZStack {
@@ -446,13 +838,13 @@ struct SettingsTabView: View {
                     }
                     .padding(.vertical, 6)
                 } else {
-                    Text(String(localized: "No server selected"))
+                    Text(String(localized: "未选择服务器"))
                         .foregroundStyle(.secondary)
                 }
             }
 
             if isLoadingLibraries {
-                Section(String(localized: "Media Libraries")) {
+                Section(String(localized: "媒体库")) {
                     HStack {
                         Spacer()
                         ProgressView()
@@ -460,8 +852,8 @@ struct SettingsTabView: View {
                     }
                 }
             } else if libraries.isEmpty {
-                Section(String(localized: "Media Libraries")) {
-                    Text(String(localized: "No libraries available"))
+                Section(String(localized: "媒体库")) {
+                    Text(String(localized: "没有可用的媒体库"))
                         .foregroundStyle(.secondary)
                 }
             } else {
@@ -469,7 +861,7 @@ struct SettingsTabView: View {
                 let unselectedLibraries = libraries.filter { !appState.selectedLibraryIds.contains($0.id) }
 
                 if !selectedLibraries.isEmpty {
-                    Section(String(localized: "Selected Media Libraries")) {
+                    Section(String(localized: "已选媒体库")) {
                         ForEach(selectedLibraries) { library in
                             Button {
                                 appState.toggleLibrary(library.id, modelContext: modelContext)
@@ -493,7 +885,7 @@ struct SettingsTabView: View {
                                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text(library.name ?? String(localized: "Unknown"))
+                                        Text(library.name ?? String(localized: "未知"))
                                             .font(.headline)
                                         if let collectionType = library.collectionType {
                                             Text(collectionType.capitalized)
@@ -513,7 +905,7 @@ struct SettingsTabView: View {
                 }
 
                 if !unselectedLibraries.isEmpty {
-                    Section(String(localized: "Media Libraries")) {
+                    Section(String(localized: "媒体库")) {
                         ForEach(unselectedLibraries) { library in
                             Button {
                                 appState.toggleLibrary(library.id, modelContext: modelContext)
@@ -537,7 +929,7 @@ struct SettingsTabView: View {
                                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text(library.name ?? String(localized: "Unknown"))
+                                        Text(library.name ?? String(localized: "未知"))
                                             .font(.headline)
                                         if let collectionType = library.collectionType {
                                             Text(collectionType.capitalized)
@@ -557,7 +949,7 @@ struct SettingsTabView: View {
                 }
             }
 
-            Section(String(localized: "Servers")) {
+            Section(String(localized: "服务器列表")) {
                 ForEach(servers) { server in
                     Button {
                         appState.selectServer(server)
@@ -607,12 +999,12 @@ struct SettingsTabView: View {
                 Button {
                     showAddServer = true
                 } label: {
-                    Label(String(localized: "Add Server"), systemImage: "plus")
+                    Label(String(localized: "添加服务器"), systemImage: "plus")
                 }
             }
         }
         .listStyle(.insetGrouped)
-        .navigationTitle(String(localized: "Settings"))
+        .navigationTitle("设置")
         .task {
             await loadLibraries()
         }

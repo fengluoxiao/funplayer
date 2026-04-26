@@ -130,7 +130,7 @@ struct ServerSetupView: View {
                                     .foregroundStyle(selectedLibraryIds.contains(library.id) ? .blue : .secondary)
 
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(library.name ?? String(localized: "Unknown"))
+                                    Text(library.name ?? "未知")
                                         .font(.headline)
                                     if let collectionType = library.collectionType {
                                         Text(collectionType.capitalized)
