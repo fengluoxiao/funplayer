@@ -134,10 +134,10 @@ struct PopupBarView: View {
             // 歌曲信息
             VStack(alignment: .leading, spacing: 2) {
                 Text(player.currentItem?.name ?? "Not Playing")
-                    .font(.subheadline.weight(.medium))
+                    .font(.caption.weight(.medium))
                     .lineLimit(1)
                 Text(artistText())
-                    .font(.caption)
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
