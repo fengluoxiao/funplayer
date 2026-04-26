@@ -31,6 +31,7 @@ struct ContentView: View {
         }
         .onAppear {
             initializeSelectedServer()
+            preloadCurrentArtwork()
         }
         .onChange(of: servers) {
             initializeSelectedServer()
@@ -43,6 +44,29 @@ struct ContentView: View {
                 appState.selectServer(firstAuthenticated)
             } else if let first = servers.first {
                 appState.selectServer(first)
+            }
+        }
+    }
+
+    private func preloadCurrentArtwork() {
+        let player = PlayerManager.shared
+        guard let item = player.currentItem, let server = player.currentServer else { return }
+
+        // 如果缓存中已有封面，不需要重新加载
+        if ArtworkCache.shared.image(for: item.id) != nil { return }
+
+        // 异步重新加载封面
+        Task {
+            let client = JellyfinClient()
+            client.serverConfig = server
+            guard let url = client.imageURL(itemId: item.id, maxWidth: 800) else { return }
+            do {
+                let (data, _) = try await URLSession.shared.data(from: url)
+                if let image = UIImage(data: data) {
+                    ArtworkCache.shared.setImage(image, for: item.id)
+                }
+            } catch {
+                print("[ContentView] Preload artwork error: \(error)")
             }
         }
     }
@@ -79,9 +103,10 @@ struct ContentView: View {
             set: { _ in }
         ), isPopupOpen: $player.showFullScreenPlayer) {
             FullScreenPlayer()
-                .popupItem {
-                    makePopupItem()
-                }
+        }
+        .popupBarStyle(.floating)
+        .popupBarCustomView(wantsDefaultTapGesture: true, wantsDefaultPanGesture: true, wantsDefaultHighlightGesture: true) {
+            PopupBarView()
         }
     }
 }
@@ -91,44 +116,76 @@ private func artistText() -> String {
     return item.albumArtist ?? item.artists?.first ?? item.album ?? ""
 }
 
-private func makePopupItem() -> PopupItem<String, String, String, some ToolbarContent> {
-    let player = PlayerManager.shared
-    let item = player.currentItem
-    let title = item?.name ?? "Not Playing"
-    let subtitle = artistText()
-    let image = popupBarImage(for: item)
-    
-    return PopupItem(id: item?.id ?? "noItem", title: title, subtitle: subtitle, image: image) {
-        ToolbarItem(placement: .popupBar) {
-            HStack(spacing: 20) {
+// MARK: - Popup Bar View
+
+struct PopupBarView: View {
+    @StateObject private var player = PlayerManager.shared
+    @StateObject private var client = JellyfinClient()
+
+    var body: some View {
+        HStack(spacing: 12) {
+            // 专辑封面
+            artworkView()
+                .frame(width: 32, height: 32)
+                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+
+            // 歌曲信息
+            VStack(alignment: .leading, spacing: 2) {
+                Text(player.currentItem?.name ?? "Not Playing")
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
+                Text(artistText())
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            // 播放控制
+            HStack(spacing: 0) {
                 Button {
                     player.togglePlayPause()
                 } label: {
                     Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                        .font(.title3)
+                        .frame(width: 44, height: 44)
                 }
-                .frame(minWidth: 30)
-                
+
                 Button {
                     player.nextTrack()
                 } label: {
                     Image(systemName: "forward.fill")
+                        .font(.body)
+                        .frame(width: 36, height: 44)
                 }
-                .frame(minWidth: 30)
             }
         }
+        .padding(.horizontal, 12)
+        .onAppear {
+            client.serverConfig = player.currentServer
+        }
     }
-}
 
-private func popupBarImage(for item: BaseItemDto?) -> PopupItemImage? {
-    guard let item = item else { return nil }
-    
-    // 尝试从缓存获取图片
-    if let cachedImage = ArtworkCache.shared.image(for: item.id) {
-        return PopupItemImage(Image(uiImage: cachedImage))
+    @ViewBuilder
+    private func artworkView() -> some View {
+        if let item = player.currentItem,
+           let url = client.imageURL(itemId: item.id, maxWidth: 200) {
+            AsyncImage(url: url) { phase in
+                if let image = phase.image {
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                } else if phase.error != nil {
+                    Color.gray.opacity(0.3)
+                } else {
+                    Color.gray.opacity(0.15)
+                }
+            }
+        } else {
+            Color.gray.opacity(0.3)
+        }
     }
-    
-    // 如果没有缓存，返回 nil（不显示图片）
-    return nil
 }
 
 // MARK: - 欢迎页面（首次启动）
