@@ -520,7 +520,7 @@ struct AlbumTrackListView: View {
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 0) {
                         artworkView(width: screenW)
-                            .frame(width: screenW, height: screenW)
+                            .frame(width: screenW, height: screenW + 22)
                             .clipped()
 
                         albumInfoView()
