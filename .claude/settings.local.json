@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uuidgen)",
+      "Bash(plutil -lint /Users/fengluoxiao/Documents/未命名文件夹/funPlayer/funPlayer.xcodeproj/project.pbxproj)"
+    ]
+  }
+}
