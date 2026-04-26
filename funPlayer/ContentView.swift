@@ -5,6 +5,7 @@
 
 import SwiftUI
 import SwiftData
+import LNPopupUI
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
@@ -24,9 +25,6 @@ struct ContentView: View {
                     mainTabView
                 }
             }
-        }
-        .fullScreenCover(isPresented: $player.showFullScreenPlayer) {
-            FullScreenPlayer()
         }
         .sheet(isPresented: $showAddServer) {
             ServerSetupView(showAddServer: $showAddServer)
@@ -76,12 +74,61 @@ struct ContentView: View {
             .tag(2)
         }
         .toolbarBackground(.ultraThinMaterial, for: .tabBar)
-        .tabViewBottomAccessory(isEnabled: player.currentItem != nil) {
-            MiniPlayer()
-                .padding(.horizontal, 8)
-                .padding(.vertical, 8)
+        .popup(isBarPresented: Binding(
+            get: { player.currentItem != nil },
+            set: { _ in }
+        ), isPopupOpen: $player.showFullScreenPlayer) {
+            FullScreenPlayer()
+                .popupItem {
+                    makePopupItem()
+                }
         }
     }
+}
+
+private func artistText() -> String {
+    guard let item = PlayerManager.shared.currentItem else { return "" }
+    return item.albumArtist ?? item.artists?.first ?? item.album ?? ""
+}
+
+private func makePopupItem() -> PopupItem<String, String, String, some ToolbarContent> {
+    let player = PlayerManager.shared
+    let item = player.currentItem
+    let title = item?.name ?? "Not Playing"
+    let subtitle = artistText()
+    let image = popupBarImage(for: item)
+    
+    return PopupItem(id: item?.id ?? "noItem", title: title, subtitle: subtitle, image: image) {
+        ToolbarItem(placement: .popupBar) {
+            HStack(spacing: 20) {
+                Button {
+                    player.togglePlayPause()
+                } label: {
+                    Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                }
+                .frame(minWidth: 30)
+                
+                Button {
+                    player.nextTrack()
+                } label: {
+                    Image(systemName: "forward.fill")
+                }
+                .frame(minWidth: 30)
+            }
+        }
+    }
+}
+
+private func popupBarImage(for item: BaseItemDto?) -> PopupItemImage? {
+    guard let item = item else { return nil }
+    
+    // 尝试从缓存获取图片
+    if let cachedImage = ArtworkCache.shared.image(for: item.id) {
+        return PopupItemImage(Image(uiImage: cachedImage))
+    }
+    
+    // 如果没有缓存，返回 nil（不显示图片）
+    return nil
 }
 
 // MARK: - 欢迎页面（首次启动）

@@ -36,7 +36,7 @@ struct MiniPlayer: View {
 }
 
 // MARK: - Artwork Container（彻底不闪版）
-private struct ArtworkContainer: View {
+struct ArtworkContainer: View {
     let itemId: String?
     @State private var artworkImage: UIImage?
 
@@ -139,7 +139,7 @@ private struct PlaybackControlsView: View {
     }
 }
 
-// MARK: - 图片缓存（如果你还没有，加上它）
+// MARK: - 图片缓存
 class ArtworkCache {
     static let shared = ArtworkCache()
     private var cache = NSCache<NSString, UIImage>()

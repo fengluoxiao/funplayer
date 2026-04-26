@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		214E46CD2F9DA07D006793F2 /* AVRouting.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 214E46CC2F9DA07D006793F2 /* AVRouting.framework */; };
+		215545792F9E4B7E004C065D /* LNPopupUI-Static in Frameworks */ = {isa = PBXBuildFile; productRef = 215545782F9E4B7E004C065D /* LNPopupUI-Static */; };
 		216EEDC02F9D3316004DEA56 /* AVFAudio.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 216EEDBE2F9D3313004DEA56 /* AVFAudio.framework */; };
 		216EEDC32F9D3317004DEA56 /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 216EEDBA2F9D3301004DEA56 /* AVFoundation.framework */; };
 		216EEDC52F9D3319004DEA56 /* AVKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 216EEDBC2F9D330C004DEA56 /* AVKit.framework */; };
@@ -34,6 +35,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				215545792F9E4B7E004C065D /* LNPopupUI-Static in Frameworks */,
 				216EEDC02F9D3316004DEA56 /* AVFAudio.framework in Frameworks */,
 				216EEDC32F9D3317004DEA56 /* AVFoundation.framework in Frameworks */,
 				214E46CD2F9DA07D006793F2 /* AVRouting.framework in Frameworks */,
@@ -92,6 +94,7 @@
 			);
 			name = funPlayer;
 			packageProductDependencies = (
+				215545782F9E4B7E004C065D /* LNPopupUI-Static */,
 			);
 			productName = funPlayer;
 			productReference = 216EECC22F9D1465004DEA56 /* funPlayer.app */;
@@ -121,6 +124,9 @@
 			);
 			mainGroup = 216EECB92F9D1464004DEA56;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				215545752F9E4B7E004C065D /* XCRemoteSwiftPackageReference "LNPopupUI" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 216EECC32F9D1465004DEA56 /* Products */;
 			projectDirPath = "";
@@ -362,6 +368,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		215545752F9E4B7E004C065D /* XCRemoteSwiftPackageReference "LNPopupUI" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/LeoNatan/LNPopupUI";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 3.0.2;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		215545782F9E4B7E004C065D /* LNPopupUI-Static */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 215545752F9E4B7E004C065D /* XCRemoteSwiftPackageReference "LNPopupUI" */;
+			productName = "LNPopupUI-Static";
+		};
+	/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 216EECBA2F9D1464004DEA56 /* Project object */;
 }

@@ -26,15 +26,6 @@ struct FullScreenPlayer: View {
                 controlPanel()
                     .padding(.bottom, safeAreaBottom + 30)
             }
-
-            VStack {
-                HStack {
-                    closeButton()
-                        .padding(.top, safeAreaTop)
-                    Spacer()
-                }
-                Spacer()
-            }
         }
     }
 
@@ -199,19 +190,6 @@ struct FullScreenPlayer: View {
             }
         }
         .padding(.horizontal, 24)
-    }
-
-    @ViewBuilder
-    private func closeButton() -> some View {
-        Button { player.showFullScreenPlayer = false } label: {
-            Image(systemName: "chevron.down")
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 44, height: 44)
-                .background(accentColor.opacity(0.8))
-                .clipShape(Circle())
-        }
-        .padding(.leading)
     }
 
     @ViewBuilder

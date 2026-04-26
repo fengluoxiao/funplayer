@@ -344,6 +344,9 @@ final class PlayerManager: ObservableObject {
         do {
             let (data, _) = try await URLSession.shared.data(from: url)
             if let image = UIImage(data: data) {
+                // 存入 ArtworkCache，供 popup bar 使用
+                ArtworkCache.shared.setImage(image, for: item.id)
+                
                 let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
                 var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
                 info[MPMediaItemPropertyArtwork] = artwork
