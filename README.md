@@ -1,4 +1,4 @@
-# funPlayer
+；# funPlayer
 
 一款专为 iOS 打造的 Jellyfin 媒体播放器，支持音乐、电影、电视剧的流畅播放与优雅体验。
 
@@ -77,5 +77,3 @@ funPlayer/
 ---
 
 ## 开源协议
-
-MIT License
