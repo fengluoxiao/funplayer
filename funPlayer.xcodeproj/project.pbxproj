@@ -386,7 +386,7 @@
 			package = 215545752F9E4B7E004C065D /* XCRemoteSwiftPackageReference "LNPopupUI" */;
 			productName = "LNPopupUI-Static";
 		};
-	/* End XCSwiftPackageProductDependency section */
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 216EECBA2F9D1464004DEA56 /* Project object */;
 }

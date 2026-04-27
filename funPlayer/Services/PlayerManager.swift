@@ -50,6 +50,7 @@ final class PlayerManager: ObservableObject {
     @Published var repeatMode: RepeatMode = .off
     @Published var shuffleMode: ShuffleMode = .off
     @Published var showFullScreenPlayer = false
+    @Published var showPlaylist = false
     @Published var accentColor: Color = Color(UIColor.systemBlue)
 
     var currentItem: BaseItemDto? {
@@ -60,11 +61,13 @@ final class PlayerManager: ObservableObject {
     private var player: AVPlayer?
     private var timeObserver: Any?
     private var cancellables = Set<AnyCancellable>()
+    private var playbackEndCancellable: AnyCancellable?
     var currentServer: ServerConfig?
     private var shuffledIndices: [Int] = []
 
     private init() {
         setupRemoteCommands()
+        setupPlaybackEndObserver()
     }
 
     // MARK: - Playback Control
@@ -102,7 +105,16 @@ final class PlayerManager: ObservableObject {
 
                 var playURL: URL?
                 if let source = playbackInfo.mediaSources?.first {
-                    if let directUrl = source.directStreamUrl, !directUrl.isEmpty {
+                    let enableDirectPlay = server.enableDirectPlay
+                    if enableDirectPlay, let directUrl = source.directStreamUrl, !directUrl.isEmpty {
+                        playURL = URL(string: directUrl)
+                    } else if enableDirectPlay, source.supportsDirectPlay == true, let path = source.path, !path.isEmpty {
+                        if path.hasPrefix("http") {
+                            playURL = URL(string: path)
+                        } else {
+                            playURL = URL(string: server.currentURL + "/Items/" + item.id + "/Download?api_key=" + (server.accessToken ?? ""))
+                        }
+                    } else if let directUrl = source.directStreamUrl, !directUrl.isEmpty {
                         playURL = URL(string: directUrl)
                     } else if let transcodeUrl = source.transcodingUrl, !transcodeUrl.isEmpty {
                         var urlString = transcodeUrl
@@ -111,7 +123,7 @@ final class PlayerManager: ObservableObject {
                         }
                         playURL = URL(string: urlString)
                     } else {
-                        playURL = client.streamingURL(mediaSourceId: source.id) ?? client.hlsURL(mediaSourceId: source.id)
+                        playURL = client.streamingURL(itemId: item.id, mediaSourceId: source.id) ?? client.hlsURL(itemId: item.id, mediaSourceId: source.id)
                     }
                 }
 
@@ -262,27 +274,40 @@ final class PlayerManager: ObservableObject {
             player = AVPlayer(playerItem: playerItem)
         }
 
-        player?.currentItem?.publisher(for: \.status)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] status in
-                guard let self = self else { return }
-                switch status {
-                case .readyToPlay:
-                    self.isLoading = false
-                    self.duration = self.player?.currentItem?.duration.seconds ?? 0
-                    self.player?.play()
-                    self.isPlaying = true
-                    self.updateNowPlayingInfo()
-                case .failed:
-                    self.isLoading = false
-                    self.errorMessage = self.player?.currentItem?.error?.localizedDescription ?? "Playback failed"
-                default:
-                    break
-                }
-            }
-            .store(in: &cancellables)
+        await waitForItemReady()
+        addTimeObserver()
+    }
 
-        NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)
+    private func waitForItemReady() async {
+        guard let item = player?.currentItem else { return }
+
+        while item.status == .unknown {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+
+        await MainActor.run {
+            switch item.status {
+            case .readyToPlay:
+                self.isLoading = false
+                let durationSeconds = item.duration.seconds
+                self.duration = durationSeconds.isFinite ? durationSeconds : 0
+                self.player?.play()
+                self.isPlaying = true
+                self.updateNowPlayingInfo()
+            case .failed:
+                self.isLoading = false
+                self.errorMessage = item.error?.localizedDescription ?? "Playback failed"
+            default:
+                break
+            }
+        }
+    }
+
+    private var lastReportedTime: Double = 0
+    private var progressReportTask: Task<Void, Never>?
+
+    private func setupPlaybackEndObserver() {
+        playbackEndCancellable = NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 guard let self = self else { return }
@@ -293,13 +318,7 @@ final class PlayerManager: ObservableObject {
                     self.nextTrack()
                 }
             }
-            .store(in: &cancellables)
-
-        addTimeObserver()
     }
-
-    private var lastReportedTime: Double = 0
-    private var progressReportTask: Task<Void, Never>?
 
     private func addTimeObserver() {
         removeTimeObserver()
@@ -449,39 +468,46 @@ final class PlayerManager: ObservableObject {
     private func setupRemoteCommands() {
         let center = MPRemoteCommandCenter.shared()
 
+        center.playCommand.isEnabled = true
         center.playCommand.addTarget { [weak self] _ in
             self?.togglePlayPause()
             return .success
         }
+        center.pauseCommand.isEnabled = true
         center.pauseCommand.addTarget { [weak self] _ in
             self?.togglePlayPause()
             return .success
         }
+        center.togglePlayPauseCommand.isEnabled = true
         center.togglePlayPauseCommand.addTarget { [weak self] _ in
             self?.togglePlayPause()
             return .success
         }
+        center.nextTrackCommand.isEnabled = true
         center.nextTrackCommand.addTarget { [weak self] _ in
             self?.nextTrack()
             return .success
         }
+        center.previousTrackCommand.isEnabled = true
         center.previousTrackCommand.addTarget { [weak self] _ in
             self?.previousTrack()
             return .success
         }
-        center.skipForwardCommand.preferredIntervals = [10]
-        center.skipForwardCommand.addTarget { [weak self] _ in
-            self?.skipForward()
-            return .success
-        }
-        center.skipBackwardCommand.preferredIntervals = [10]
-        center.skipBackwardCommand.addTarget { [weak self] _ in
-            self?.skipBackward()
-            return .success
-        }
+        center.skipForwardCommand.isEnabled = false
+        center.skipBackwardCommand.isEnabled = false
+        center.changePlaybackPositionCommand.isEnabled = true
         center.changePlaybackPositionCommand.addTarget { [weak self] event in
             guard let self = self, let event = event as? MPChangePlaybackPositionCommandEvent else { return .commandFailed }
             self.seek(to: event.positionTime / self.duration)
+            return .success
+        }
+        center.likeCommand.isEnabled = true
+        center.likeCommand.addTarget { [weak self] event in
+            guard let self = self, let item = self.currentItem, let server = self.currentServer else { return .commandFailed }
+            let appState = AppState.shared
+            let libraryIds = appState.selectedLibraryIds
+            let type: FavoriteType = item.type == "MusicAlbum" ? .album : .track
+            FavoritesManager.shared.toggleFavorite(item: item, server: server, libraryIds: libraryIds, type: type)
             return .success
         }
     }

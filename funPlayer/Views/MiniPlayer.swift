@@ -115,9 +115,25 @@ private struct TrackInfoView: View {
 // MARK: - Playback Controls
 private struct PlaybackControlsView: View {
     @StateObject private var player = PlayerManager.shared
+    @StateObject private var favorites = FavoritesManager.shared
 
     var body: some View {
         HStack(spacing: 0) {
+            let isFav = favorites.isFavorite(itemId: player.currentItem?.id ?? "")
+            Button {
+                guard let item = player.currentItem, let server = player.currentServer else { return }
+                let appState = AppState.shared
+                let libraryIds = appState.selectedLibraryIds
+                let type: FavoriteType = item.type == "MusicAlbum" ? .album : .track
+                favorites.toggleFavorite(item: item, server: server, libraryIds: libraryIds, type: type)
+            } label: {
+                Image(systemName: isFav ? "heart.fill" : "heart")
+                    .font(.body)
+                    .foregroundStyle(isFav ? .red : .primary)
+                    .frame(width: 36, height: 44)
+            }
+            .padding(.trailing, 4)
+
             Button {
                 player.togglePlayPause()
             } label: {

@@ -15,12 +15,25 @@
     "%lld" : {
 
     },
+    "%lld 个地址" : {
+
+    },
     "Account" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "账户"
+          }
+        }
+      }
+    },
+    "Add secondary URL" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加副地址"
           }
         }
       }
@@ -42,6 +55,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "认证失败"
+          }
+        }
+      }
+    },
+    "Auto Switch" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自动切换"
           }
         }
       }
@@ -88,12 +111,45 @@
         }
       }
     },
+    "Delete" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除"
+          }
+        }
+      }
+    },
+    "Direct Play" : {
+
+    },
     "Done" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "完成"
+          }
+        }
+      }
+    },
+    "Edit" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "编辑"
+          }
+        }
+      }
+    },
+    "Edit Server" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "编辑服务器"
           }
         }
       }
@@ -293,6 +349,26 @@
         }
       }
     },
+    "Save" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存"
+          }
+        }
+      }
+    },
+    "Secondary URLs" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "副地址"
+          }
+        }
+      }
+    },
     "Select Libraries" : {
       "localizations" : {
         "zh-Hans" : {
@@ -377,6 +453,16 @@
         }
       }
     },
+    "Speed Test" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "网络测速"
+          }
+        }
+      }
+    },
     "Start playing or add media to your server" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -399,6 +485,46 @@
         }
       }
     },
+    "Switch to Best" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "切换到最优"
+          }
+        }
+      }
+    },
+    "Tap test to start" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "点击测速按钮开始"
+          }
+        }
+      }
+    },
+    "Test Results" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "测速结果"
+          }
+        }
+      }
+    },
+    "Testing..." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "测速中..."
+          }
+        }
+      }
+    },
     "Unknown" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -406,6 +532,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "未知"
+          }
+        }
+      }
+    },
+    "Unreachable" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法连接"
           }
         }
       }
@@ -437,6 +573,9 @@
     "最近添加" : {
 
     },
+    "取消喜欢" : {
+
+    },
     "媒体库" : {
 
     },
@@ -450,6 +589,18 @@
 
     },
     "您的库中没有%@。" : {
+
+    },
+    "我的喜欢" : {
+
+    },
+    "提示" : {
+
+    },
+    "播放设置" : {
+
+    },
+    "播放队列" : {
 
     },
     "服务器列表" : {
@@ -479,7 +630,19 @@
     "没有可用的媒体库" : {
 
     },
+    "没有喜欢的内容" : {
+
+    },
+    "添加到喜欢" : {
+
+    },
     "添加服务器" : {
+
+    },
+    "点击播放器中的爱心按钮收藏歌曲或专辑" : {
+
+    },
+    "知道了" : {
 
     },
     "设置" : {
@@ -498,6 +661,9 @@
 
     },
     "连接到你的 Jellyfin 服务器，开始享受你的媒体库。" : {
+
+    },
+    "需要重新播放音乐才能生效" : {
 
     }
   },

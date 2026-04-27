@@ -6,9 +6,11 @@
 import SwiftUI
 import MediaPlayer
 import AVKit
+import LNPopupUI
 
 struct FullScreenPlayer: View {
     @StateObject private var player = PlayerManager.shared
+    @StateObject private var favorites = FavoritesManager.shared
     @State private var draggingProgress: Double?
 
     private var accentColor: Color { player.accentColor }
@@ -36,6 +38,67 @@ struct FullScreenPlayer: View {
                 Spacer()
             }
         }
+        .sheet(isPresented: $player.showPlaylist) {
+            playlistSheet()
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                .presentationBackgroundInteraction(.enabled)
+        }
+        .popupTitle(player.currentItem?.name ?? "未知", subtitle: artistText())
+        .popupImage(artworkImage(), resizable: true, aspectRatio: 1.0, contentMode: .fill)
+        .popupProgress(Float(player.progress))
+        .popupBarButtons {
+            Button {
+                player.togglePlayPause()
+            } label: {
+                Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: 20))
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                player.nextTrack()
+            } label: {
+                Image(systemName: "forward.fill")
+                    .font(.system(size: 16))
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    @ViewBuilder
+    private func playlistSheet() -> some View {
+        VStack(spacing: 0) {
+            Text("播放队列")
+                .font(.headline)
+                .foregroundStyle(.primary)
+                .padding(.top, 24)
+                .padding(.bottom, 12)
+
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(Array(player.queue.enumerated()), id: \.element.id) { index, item in
+                        Button {
+                            if index != player.currentIndex {
+                                player.currentIndex = index
+                                player.playCurrentItem()
+                            }
+                        } label: {
+                            PlaylistRow(
+                                index: index + 1,
+                                title: item.name ?? "未知",
+                                artist: item.artists?.first ?? item.albumArtist ?? "",
+                                duration: item.runTimeTicks,
+                                isPlaying: index == player.currentIndex
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+        .background(.regularMaterial)
+        .environment(\.colorScheme, .light)
     }
 
     @ViewBuilder
@@ -77,6 +140,23 @@ struct FullScreenPlayer: View {
             playbackControlsView()
             volumeView()
             extraControlsView()
+        }
+    }
+
+    @ViewBuilder
+    private func favoriteButton() -> some View {
+        let isFav = favorites.isFavorite(itemId: player.currentItem?.id ?? "")
+        Button {
+            guard let item = player.currentItem, let server = player.currentServer else { return }
+            let appState = AppState.shared
+            let libraryIds = appState.selectedLibraryIds
+            let type: FavoriteType = item.type == "MusicAlbum" ? .album : .track
+            favorites.toggleFavorite(item: item, server: server, libraryIds: libraryIds, type: type)
+        } label: {
+            Image(systemName: isFav ? "heart.fill" : "heart")
+                .font(.system(size: 24))
+                .foregroundStyle(isFav ? .red : accentColor)
+                .frame(maxWidth: .infinity)
         }
     }
 
@@ -126,12 +206,7 @@ struct FullScreenPlayer: View {
     @ViewBuilder
     private func playbackControlsView() -> some View {
         HStack(spacing: 0) {
-            Button {} label: {
-                Image(systemName: "heart")
-                    .font(.system(size: 24))
-                    .foregroundStyle(accentColor)
-                    .frame(maxWidth: .infinity)
-            }
+            favoriteButton()
             Button { player.previousTrack() } label: {
                 Image(systemName: "backward.fill")
                     .font(.system(size: 28))
@@ -150,7 +225,7 @@ struct FullScreenPlayer: View {
                     .foregroundStyle(accentColor)
                     .frame(maxWidth: .infinity)
             }
-            Button {} label: {
+            Button { withAnimation(.spring()) { player.showPlaylist.toggle() } } label: {
                 Image(systemName: "list.bullet")
                     .font(.system(size: 24))
                     .foregroundStyle(accentColor)
@@ -182,16 +257,9 @@ struct FullScreenPlayer: View {
     @ViewBuilder
     private func extraControlsView() -> some View {
         HStack(spacing: 0) {
-            ZStack {
-                RoutePickerView(tintColor: UIColor(player.accentColor))
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 44)
-                Image(systemName: "airplayaudio")
-                    .font(.system(size: 20))
-                    .foregroundStyle(accentColor)
-                    .allowsHitTesting(false)
-            }
-            .frame(maxWidth: .infinity)
+            RoutePickerView(tintColor: UIColor(player.accentColor))
+                .frame(maxWidth: .infinity)
+                .frame(height: 20)
             Button { player.toggleShuffleMode() } label: {
                 Image(systemName: "shuffle")
                     .font(.system(size: 20))
@@ -293,6 +361,59 @@ struct FullScreenPlayer: View {
         let secs = Int(seconds) % 60
         return String(format: "%d:%02d", mins, secs)
     }
+
+    private func artistText() -> String {
+        guard let item = player.currentItem else { return "" }
+        return item.albumArtist ?? item.artists?.first ?? item.album ?? ""
+    }
+
+    private func artworkImage() -> Image? {
+        guard let uiImage = ArtworkCache.shared.image(for: player.currentItem?.id ?? "") else { return nil }
+        return Image(uiImage: uiImage)
+    }
+
+}
+
+struct PlaylistRow: View {
+    let index: Int
+    let title: String
+    let artist: String
+    let duration: Int64?
+    let isPlaying: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            if isPlaying {
+                Image(systemName: "speaker.wave.2.fill")
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 28, alignment: .center)
+            } else {
+                Image(systemName: "music.note")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 28, alignment: .center)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.body)
+                    .foregroundStyle(isPlaying ? Color.accentColor : .primary)
+                    .lineLimit(1)
+
+                if !artist.isEmpty {
+                    Text(artist)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer()
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 10)
+        .background(isPlaying ? Color.accentColor.opacity(0.08) : Color.clear)
+    }
 }
 
 struct RoutePickerView: UIViewRepresentable {
@@ -336,5 +457,3 @@ struct VolumeSlider: UIViewRepresentable {
         }
     }
 }
-
-

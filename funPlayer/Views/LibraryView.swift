@@ -204,6 +204,8 @@ struct AlbumListRow: View {
     let item: BaseItemDto
     let server: ServerConfig
     @State private var imageURL: URL?
+    @StateObject private var favorites = FavoritesManager.shared
+    @StateObject private var appState = AppState.shared
 
     var body: some View {
         HStack(spacing: 12) {
@@ -262,6 +264,16 @@ struct AlbumListRow: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 6)
         .contentShape(Rectangle())
+        .contextMenu {
+            let isFav = favorites.isFavorite(itemId: item.id)
+            Button {
+                favorites.toggleFavorite(item: item, server: server, libraryIds: appState.selectedLibraryIds, type: .album)
+                let message = isFav ? "已取消喜欢" : "已添加到我的喜欢"
+                ToastManager.shared.show(message)
+            } label: {
+                Label(isFav ? "取消喜欢" : "添加到喜欢", systemImage: isFav ? "heart.slash" : "heart")
+            }
+        }
     }
 }
 
@@ -503,19 +515,23 @@ struct AlbumTrackListView: View {
     let albumId: String
     let title: String
     @StateObject private var client = JellyfinClient()
+    @StateObject private var favorites = FavoritesManager.shared
+    @StateObject private var appState = AppState.shared
     @State private var items: [BaseItemDto] = []
     @State private var albumItem: BaseItemDto?
     @State private var isLoading = true
     @State private var accentColor: Color = Color(UIColor.systemBlue)
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         ZStack {
+            backgroundView()
+                .ignoresSafeArea()
+
             GeometryReader { proxy in
                 let screenW = proxy.size.width
                 let screenH = proxy.size.height
                 let bottomInset = proxy.safeAreaInsets.bottom
-
-                backgroundView(width: screenW, height: screenH)
 
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 0) {
@@ -534,9 +550,25 @@ struct AlbumTrackListView: View {
                 .refreshable {
                     await loadAlbumTracks()
                 }
+                .scrollEdgeEffectHidden()
                 .ignoresSafeArea(edges: .top)
             }
         }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                if let item = albumItem {
+                    let isFav = favorites.isFavorite(itemId: item.id)
+                    Button {
+                        favorites.toggleFavorite(item: item, server: server, libraryIds: appState.selectedLibraryIds, type: .album)
+                    } label: {
+                        Image(systemName: isFav ? "heart.fill" : "heart")
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundStyle(isFav ? .red : .primary)
+                    }
+                }
+            }
+        }
+        .toolbarColorScheme(.light, for: .tabBar)
         .task {
             client.serverConfig = server
             await loadAlbumTracks()
@@ -632,29 +664,30 @@ struct AlbumTrackListView: View {
     }
 
     @ViewBuilder
-    private func backgroundView(width: CGFloat, height: CGFloat) -> some View {
-        Group {
-            if let url = albumArtworkURL() {
-                AsyncImage(url: url) { phase in
-                    if let image = phase.image {
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(width: width, height: height)
-                            .clipped()
-                            .blur(radius: 80)
-                    } else {
-                        Color(uiColor: .systemBackground)
+    private func backgroundView() -> some View {
+        GeometryReader { proxy in
+            let width = proxy.size.width
+            let height = proxy.size.height
+            Group {
+                if let url = albumArtworkURL() {
+                    AsyncImage(url: url) { phase in
+                        if let image = phase.image {
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(width: width, height: height)
+                                .clipped()
+                                .blur(radius: 60)
+                                .overlay(Color.white.opacity(0.7))
+                        } else {
+                            Color.white
+                        }
                     }
+                } else {
+                    Color.white
                 }
-            } else {
-                Color(uiColor: .systemBackground)
             }
         }
-        .ignoresSafeArea()
-        .overlay(
-            Color(uiColor: .systemBackground).opacity(0.75)
-        )
     }
 
     private func albumArtworkURL() -> URL? {
@@ -789,7 +822,7 @@ struct TrackRow: View {
         .padding(.vertical, 12)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color(uiColor: .systemBackground).opacity(0.5))
+                .fill(Color.white.opacity(0.5))
         )
         .contentShape(Rectangle())
     }

@@ -76,3 +76,6 @@ Temporary Items
 *.sqlite3
 *.sqlite-wal
 *.sqlite-shm
+
+# Documentation / Notes
+doc/

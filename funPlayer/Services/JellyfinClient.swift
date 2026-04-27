@@ -36,7 +36,7 @@ class JellyfinClient: ObservableObject {
 
     private var baseURL: URL? {
         guard let config = serverConfig else { return nil }
-        var urlString = config.serverURL
+        var urlString = config.currentURL
         if urlString.hasSuffix("/") { urlString.removeLast() }
         return URL(string: urlString)
     }
@@ -260,15 +260,37 @@ class JellyfinClient: ObservableObject {
         return URL(string: base.absoluteString + path)
     }
 
-    func streamingURL(mediaSourceId: String) -> URL? {
+    func streamingURL(itemId: String, mediaSourceId: String) -> URL? {
         guard let base = baseURL, let token = serverConfig?.accessToken else { return nil }
-        let path = "/Videos/\(mediaSourceId)/stream?Static=true&api_key=\(token)"
+        let path = "/Audio/\(itemId)/universal?MediaSourceId=\(mediaSourceId)&api_key=\(token)"
         return URL(string: base.absoluteString + path)
     }
 
-    func hlsURL(mediaSourceId: String) -> URL? {
+    func hlsURL(itemId: String, mediaSourceId: String) -> URL? {
         guard let base = baseURL, let token = serverConfig?.accessToken else { return nil }
-        let path = "/Videos/\(mediaSourceId)/master.m3u8?api_key=\(token)"
+        let path = "/Audio/\(itemId)/master.m3u8?MediaSourceId=\(mediaSourceId)&api_key=\(token)"
         return URL(string: base.absoluteString + path)
+    }
+
+    // MARK: - Favorite
+
+    func addFavorite(itemId: String) async throws -> UserData {
+        guard let userId = serverConfig?.userId else { throw JellyfinError.authenticationFailed }
+        guard let req = request(for: "/Users/\(userId)/FavoriteItems/\(itemId)", method: "POST") else {
+            throw JellyfinError.invalidURL
+        }
+        let (data, response) = try await session.data(for: req)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { throw JellyfinError.invalidResponse }
+        return try JSONDecoder().decode(UserData.self, from: data)
+    }
+
+    func removeFavorite(itemId: String) async throws -> UserData {
+        guard let userId = serverConfig?.userId else { throw JellyfinError.authenticationFailed }
+        guard let req = request(for: "/Users/\(userId)/FavoriteItems/\(itemId)", method: "DELETE") else {
+            throw JellyfinError.invalidURL
+        }
+        let (data, response) = try await session.data(for: req)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { throw JellyfinError.invalidResponse }
+        return try JSONDecoder().decode(UserData.self, from: data)
     }
 }
