@@ -256,40 +256,41 @@ struct AlbumListRow: View {
     let item: BaseItemDto
     let server: ServerConfig
     @State private var imageURL: URL?
+    @State private var localArtwork: UIImage?
     @StateObject private var favorites = FavoritesManager.shared
     @StateObject private var appState = AppState.shared
 
     var body: some View {
         HStack(spacing: 12) {
             // Album Artwork
-            AsyncImage(url: imageURL) { phase in
-                if let image = phase.image {
-                    image
+            Group {
+                if let localImage = localArtwork {
+                    Image(uiImage: localImage)
                         .resizable()
                         .aspectRatio(contentMode: .fill)
-                } else if phase.error != nil {
-                    Color.gray.opacity(0.25)
-                        .overlay(
-                            Image(systemName: "music.note")
-                                .font(.system(size: 20))
-                                .foregroundStyle(.gray.opacity(0.6))
-                        )
                 } else {
-                    Color.gray.opacity(0.12)
+                    AsyncImage(url: imageURL) { phase in
+                        if let image = phase.image {
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                        } else if phase.error != nil {
+                            Color.gray.opacity(0.25)
+                                .overlay(
+                                    Image(systemName: "music.note")
+                                        .font(.system(size: 20))
+                                        .foregroundStyle(.gray.opacity(0.6))
+                                )
+                        } else {
+                            Color.gray.opacity(0.12)
+                        }
+                    }
                 }
             }
             .frame(width: 56, height: 56)
             .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
             .task {
-                if imageURL == nil {
-                    if let tags = item.imageTags, !tags.isEmpty {
-                        let client = JellyfinClient()
-                        client.serverConfig = server
-                        imageURL = client.imageURL(itemId: item.id, maxWidth: 200)
-                    } else {
-                        imageURL = nil
-                    }
-                }
+                loadArtwork()
             }
 
             // Album Info
@@ -314,9 +315,9 @@ struct AlbumListRow: View {
                 .foregroundStyle(.gray.opacity(0.4))
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 6)
-        .contentShape(Rectangle())
-        .contextMenu {
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
+            .contextMenu {
             let isFav = favorites.isFavorite(itemId: item.id)
             Button {
                 favorites.toggleFavorite(item: item, server: server, libraryIds: appState.selectedLibraryIds, type: .album)
@@ -324,6 +325,24 @@ struct AlbumListRow: View {
                 ToastManager.shared.show(message)
             } label: {
                 Label(isFav ? "取消喜欢" : "添加到喜欢", systemImage: isFav ? "heart.slash" : "heart")
+            }
+        }
+    }
+
+    private func loadArtwork() {
+        // 先尝试本地封面
+        if let url = DownloadManager.shared.getLocalArtworkURL(itemId: item.id) {
+            if let data = try? Data(contentsOf: url) {
+                localArtwork = UIImage(data: data)
+                return
+            }
+        }
+        // 再尝试网络封面
+        if imageURL == nil {
+            if let tags = item.imageTags, !tags.isEmpty {
+                let client = JellyfinClient()
+                client.serverConfig = server
+                imageURL = client.imageURL(itemId: item.id, maxWidth: 200)
             }
         }
     }

@@ -434,107 +434,72 @@ struct HomeItemCard: View {
     @StateObject private var player = PlayerManager.shared
     @State private var localArtwork: UIImage?
 
+    private var isAlbum: Bool {
+        item.type == "MusicAlbum"
+    }
+
     var body: some View {
-        Button {
-            playItem()
-        } label: {
-            VStack(alignment: .leading, spacing: 8) {
-                Group {
-                    if let localImage = localArtwork {
-                        Image(uiImage: localImage)
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                    } else {
-                        AsyncImage(url: client.imageURL(itemId: item.id, maxWidth: 300)) { phase in
-                            if let image = phase.image {
-                                image
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fill)
-                            } else if phase.error != nil {
-                                Color.gray.opacity(0.3)
-                            } else {
-                                Color.gray.opacity(0.15)
-                            }
+        let content = VStack(alignment: .leading, spacing: 8) {
+            Group {
+                if let localImage = localArtwork {
+                    Image(uiImage: localImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                } else {
+                    AsyncImage(url: client.imageURL(itemId: item.id, maxWidth: 300)) { phase in
+                        if let image = phase.image {
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                        } else if phase.error != nil {
+                            Color.gray.opacity(0.3)
+                        } else {
+                            Color.gray.opacity(0.15)
                         }
                     }
                 }
-                .frame(width: 150, height: 150)
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .onAppear {
-                    loadLocalArtwork()
-                }
+            }
+            .frame(width: 150, height: 150)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .onAppear {
+                loadLocalArtwork()
+            }
 
-                Text(item.name ?? "Unknown")
-                    .font(.subheadline.bold())
+            Text(item.name ?? "Unknown")
+                .font(.subheadline.bold())
+                .lineLimit(1)
+                .frame(width: 150, alignment: .leading)
+
+            if let artist = item.albumArtist ?? item.artists?.first ?? item.seriesName {
+                Text(artist)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .frame(width: 150, alignment: .leading)
-
-                if let artist = item.albumArtist ?? item.artists?.first ?? item.seriesName {
-                    Text(artist)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .frame(width: 150, alignment: .leading)
-                }
             }
         }
-        .buttonStyle(.plain)
-    }
+        .contentShape(Rectangle())
 
-    private func playItem() {
-        guard let server = client.serverConfig else { return }
-        if item.type == "MusicAlbum" {
-            Task {
-                do {
-                    let tracks = try await client.getItems(
-                        parentId: item.id,
-                        includeItemTypes: "Audio",
-                        sortBy: "ParentIndexNumber,IndexNumber"
-                    )
-                    if let first = tracks.first, let index = tracks.firstIndex(where: { $0.id == first.id }) {
-                        player.play(queue: tracks, index: index, server: server)
-                    }
-                } catch {
-                    print("[HomeItemCard] Error loading album tracks: \(error)")
-                    await playDownloadedTracks(server: server)
-                }
+        if isAlbum, let server = client.serverConfig {
+            NavigationLink {
+                AlbumTrackListView(server: server, albumId: item.id, title: item.name ?? "专辑")
+            } label: {
+                content
             }
+            .buttonStyle(.plain)
         } else {
-            player.playSingle(item: item, server: server)
+            Button {
+                playSingle()
+            } label: {
+                content
+            }
+            .buttonStyle(.plain)
         }
     }
 
-    private func playDownloadedTracks(server: ServerConfig) async {
-        let downloadedItems = DownloadManager.shared.getDownloadedItems(forServerId: server.id.uuidString)
-        guard !downloadedItems.isEmpty else {
-            ToastManager.shared.show("没有已下载的曲目")
-            return
-        }
-        var tracks: [BaseItemDto] = []
-        for download in downloadedItems {
-            let dto = BaseItemDto(
-                id: download.itemId,
-                name: download.name,
-                type: download.type,
-                overview: nil,
-                indexNumber: nil,
-                parentIndexNumber: nil,
-                seriesName: nil,
-                album: nil,
-                    albumId: nil,
-                albumArtist: download.artist,
-                artists: download.artist != nil ? [download.artist!] : nil,
-                runTimeTicks: nil,
-                userData: nil,
-                primaryImageAspectRatio: nil,
-                imageTags: nil,
-                backdropImageTags: nil,
-                mediaType: nil,
-                collectionType: nil
-            )
-            tracks.append(dto)
-        }
-        player.play(queue: tracks, index: 0, server: server)
+    private func playSingle() {
+        guard let server = client.serverConfig else { return }
+        player.playSingle(item: item, server: server)
     }
 
     private func loadLocalArtwork() {
@@ -591,6 +556,13 @@ struct LibraryTabView: View {
     private var downloadedItemIds: Set<String> {
         guard let server = appState.selectedServer else { return [] }
         return downloadManager.getDownloadedItemIds(forServerId: server.id.uuidString)
+    }
+
+    private var displayedCategories: [LibraryCategory] {
+        if showDownloadedOnly {
+            return [.favorites, .playlists, .albums, .songs]
+        }
+        return LibraryCategory.allCases
     }
 
     private var filteredAlbums: [BaseItemDto] {
@@ -670,12 +642,12 @@ struct LibraryTabView: View {
 
                     // Category List (Apple Music Style)
                     VStack(spacing: 0) {
-                        ForEach(LibraryCategory.allCases) { category in
+                        ForEach(displayedCategories) { category in
                             NavigationLink(value: category) {
                                 LibraryCategoryRow(category: category, count: countForCategory(category))
                             }
 
-                            if category != LibraryCategory.allCases.last {
+                            if category != displayedCategories.last {
                                 Divider()
                                     .padding(.leading, 56)
                             }
@@ -785,8 +757,38 @@ struct LibraryTabView: View {
                     allSongs.append(dto)
                 }
             }
+            // 从下载记录中提取艺人（根据专辑艺术家或单曲艺术家）
+            var artistMap: [String: BaseItemDto] = [:]
+            for download in downloadedItems {
+                if let artist = download.artist, !artist.isEmpty {
+                    if artistMap[artist] == nil {
+                        let artistDto = BaseItemDto(
+                            id: "artist_\(artist)",
+                            name: artist,
+                            type: "MusicArtist",
+                            overview: nil,
+                            indexNumber: nil,
+                            parentIndexNumber: nil,
+                            seriesName: nil,
+                            album: nil,
+                            albumId: nil,
+                            albumArtist: artist,
+                            artists: [artist],
+                            runTimeTicks: nil,
+                            userData: nil,
+                            primaryImageAspectRatio: nil,
+                            imageTags: nil,
+                            backdropImageTags: nil,
+                            mediaType: nil,
+                            collectionType: nil
+                        )
+                        artistMap[artist] = artistDto
+                    }
+                }
+            }
+
             albums = allAlbums
-            artists = []
+            artists = Array(artistMap.values).sorted { ($0.name ?? "") < ($1.name ?? "") }
             songs = allSongs
             isLoading = false
             return
