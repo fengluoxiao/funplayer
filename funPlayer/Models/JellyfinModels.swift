@@ -34,6 +34,7 @@ struct BaseItemDto: Codable, Identifiable, Hashable {
     let parentIndexNumber: Int?
     let seriesName: String?
     let album: String?
+    let albumId: String?
     let albumArtist: String?
     let artists: [String]?
     let runTimeTicks: Int64?
@@ -53,6 +54,7 @@ struct BaseItemDto: Codable, Identifiable, Hashable {
         case parentIndexNumber = "ParentIndexNumber"
         case seriesName = "SeriesName"
         case album = "Album"
+        case albumId = "AlbumId"
         case albumArtist = "AlbumArtist"
         case artists = "Artists"
         case runTimeTicks = "RunTimeTicks"

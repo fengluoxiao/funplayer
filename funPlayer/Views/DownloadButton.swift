@@ -9,12 +9,15 @@ import Combine
 struct DownloadButton: View {
     let item: BaseItemDto
     let server: ServerConfig
-    @StateObject private var downloadManager = DownloadManager.shared
-    @State private var isDownloaded = false
-    @State private var isDownloading = false
-    @State private var progress: Double = 0
+    @ObservedObject private var downloadManager = DownloadManager.shared
 
     private var serverId: String { server.id.uuidString }
+    private var isDownloaded: Bool {
+        _ = downloadManager.downloadStatusVersion
+        return downloadManager.isDownloaded(itemId: item.id, serverId: serverId)
+    }
+    private var isDownloading: Bool { downloadManager.isDownloading(itemId: item.id) }
+    private var progress: Double { downloadManager.downloadProgress(for: item.id) }
 
     var body: some View {
         Button {
@@ -36,18 +39,6 @@ struct DownloadButton: View {
             }
         }
         .buttonStyle(.plain)
-        .onAppear {
-            updateStatus()
-        }
-        .onReceive(downloadManager.objectWillChange) {
-            updateStatus()
-        }
-    }
-
-    private func updateStatus() {
-        isDownloaded = downloadManager.isDownloaded(itemId: item.id, serverId: serverId)
-        isDownloading = downloadManager.isDownloading(itemId: item.id)
-        progress = downloadManager.downloadProgress(for: item.id)
     }
 
     private func handleTap() {

@@ -9,12 +9,15 @@ import Combine
 struct AlbumDownloadButton: View {
     let item: BaseItemDto
     let server: ServerConfig
-    @StateObject private var downloadManager = DownloadManager.shared
-    @State private var isDownloaded = false
-    @State private var isDownloading = false
-    @State private var progress: Double = 0
+    @ObservedObject private var downloadManager = DownloadManager.shared
 
     private var serverId: String { server.id.uuidString }
+    private var isDownloaded: Bool {
+        _ = downloadManager.downloadStatusVersion
+        return downloadManager.isAlbumFullyDownloaded(albumId: item.id, serverId: serverId)
+    }
+    private var isDownloading: Bool { downloadManager.isDownloading(itemId: item.id) }
+    private var progress: Double { downloadManager.downloadProgress(for: item.id) }
 
     var body: some View {
         Button {
@@ -36,18 +39,6 @@ struct AlbumDownloadButton: View {
             }
         }
         .buttonStyle(.plain)
-        .onAppear {
-            updateStatus()
-        }
-        .onReceive(downloadManager.objectWillChange) {
-            updateStatus()
-        }
-    }
-
-    private func updateStatus() {
-        isDownloaded = downloadManager.isDownloaded(itemId: item.id, serverId: serverId)
-        isDownloading = downloadManager.isDownloading(itemId: item.id)
-        progress = downloadManager.downloadProgress(for: item.id)
     }
 
     private func handleTap() {
@@ -55,7 +46,7 @@ struct AlbumDownloadButton: View {
             downloadManager.cancelDownload(itemId: item.id)
             ToastManager.shared.show("已取消下载")
         } else if isDownloaded {
-            downloadManager.deleteDownload(itemId: item.id, serverId: serverId)
+            downloadManager.deleteAlbumDownloads(albumId: item.id, serverId: serverId)
             ToastManager.shared.show("已删除下载")
         } else {
             downloadManager.downloadAlbum(item: item, server: server)

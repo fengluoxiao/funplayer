@@ -19,6 +19,7 @@ final class DownloadItem {
     @Attribute(.unique) var id: String
     var itemId: String
     var serverId: String
+    var albumId: String?
     var name: String
     var artist: String?
     var type: String?
@@ -38,11 +39,13 @@ final class DownloadItem {
         name: String,
         artist: String? = nil,
         type: String? = nil,
+        albumId: String? = nil,
         isFavorite: Bool = false
     ) {
         self.id = UUID().uuidString
         self.itemId = itemId
         self.serverId = serverId
+        self.albumId = albumId
         self.name = name
         self.artist = artist
         self.type = type
@@ -63,7 +66,7 @@ final class DownloadItem {
     }
 
     var isDownloaded: Bool {
-        downloadStatus == .completed && localFilePath != nil
+        downloadStatus == .completed
     }
 
     var localURL: URL? {

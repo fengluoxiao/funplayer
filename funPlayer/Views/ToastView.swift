@@ -41,10 +41,11 @@ struct ToastOverlay: View {
             if toast.isShowing, let message = toast.message {
                 Text(message)
                     .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
                     .padding(.horizontal, 20)
                     .padding(.vertical, 12)
-                    .glassEffect(.regular, in: .capsule)
+                    .background(.ultraThinMaterial, in: .capsule)
+                    .environment(\.colorScheme, .light)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                     .padding(.bottom, 100)
             }

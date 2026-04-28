@@ -12,6 +12,7 @@ class DownloadManager: ObservableObject {
     static let shared = DownloadManager()
 
     @Published var activeDownloads: [String: DownloadTask] = [:]
+    @Published private(set) var downloadStatusVersion: UUID = UUID()
 
     private var modelContext: ModelContext?
     private let fileManager = FileManager.default
@@ -78,6 +79,15 @@ class DownloadManager: ObservableObject {
         getDownloadItem(itemId: itemId, serverId: serverId)?.isDownloaded ?? false
     }
 
+    func isAlbumFullyDownloaded(albumId: String, serverId: String) -> Bool {
+        guard let context = modelContext else { return false }
+        let descriptor = FetchDescriptor<DownloadItem>(
+            predicate: #Predicate { $0.albumId == albumId && $0.serverId == serverId && $0.type == "Audio" }
+        )
+        guard let items = try? context.fetch(descriptor), !items.isEmpty else { return false }
+        return items.allSatisfy { $0.isDownloaded }
+    }
+
     func isDownloading(itemId: String) -> Bool {
         activeDownloads[itemId] != nil
     }
@@ -103,6 +113,7 @@ class DownloadManager: ObservableObject {
             name: item.name ?? "Unknown",
             artist: item.albumArtist ?? item.artists?.first,
             type: item.type,
+            albumId: item.albumId,
             isFavorite: isFavorite
         )
 
@@ -194,7 +205,8 @@ class DownloadManager: ObservableObject {
             serverId: serverId,
             name: item.name ?? "Unknown Album",
             artist: item.albumArtist ?? item.artists?.first,
-            type: "MusicAlbum"
+            type: "MusicAlbum",
+            albumId: albumId
         )
         modelContext?.insert(albumDownloadItem)
         albumDownloadItem.downloadStatus = .downloading
@@ -246,7 +258,7 @@ class DownloadManager: ObservableObject {
                     }
 
                     // 下载单个曲目
-                    await self.downloadTrackAsync(item: track, server: server)
+                    await self.downloadTrackAsync(item: track, server: server, albumId: albumId)
                     completedCount += 1
 
                     // 更新专辑整体进度
@@ -262,8 +274,12 @@ class DownloadManager: ObservableObject {
                 await MainActor.run {
                     albumDownloadItem.downloadStatus = .completed
                     albumDownloadItem.progress = 1.0
+                    if albumDownloadItem.localFilePath == nil {
+                        albumDownloadItem.localFilePath = albumDownloadItem.artworkFilePath
+                    }
                     try? self.modelContext?.save()
                     self.activeDownloads.removeValue(forKey: albumId)
+                    self.downloadStatusVersion = UUID()
                     ToastManager.shared.show("\"\(albumDownloadItem.name)\" 专辑下载完成")
                 }
             } catch {
@@ -281,11 +297,13 @@ class DownloadManager: ObservableObject {
         ToastManager.shared.show("开始下载专辑 \"\(albumDownloadItem.name)\"")
     }
 
-    private func downloadTrackAsync(item: BaseItemDto, server: ServerConfig) async {
+    private func downloadTrackAsync(item: BaseItemDto, server: ServerConfig, albumId: String? = nil) async {
         let itemId = item.id
         let serverId = server.id.uuidString
 
-        guard !isDownloaded(itemId: itemId, serverId: serverId) else { return }
+        if isDownloaded(itemId: itemId, serverId: serverId) {
+            return
+        }
 
         let isFavorite = item.userData?.isFavorite ?? false
 
@@ -295,6 +313,7 @@ class DownloadManager: ObservableObject {
             name: item.name ?? "Unknown",
             artist: item.albumArtist ?? item.artists?.first,
             type: item.type,
+            albumId: albumId,
             isFavorite: isFavorite
         )
 
@@ -311,6 +330,7 @@ class DownloadManager: ObservableObject {
                 downloadItem.downloadStatus = .failed
                 downloadItem.errorMessage = "无法构建下载链接"
                 try? self.modelContext?.save()
+                self.objectWillChange.send()
             }
             return
         }
@@ -327,6 +347,7 @@ class DownloadManager: ObservableObject {
 
             task.onCompletion = { result in
                 Task { @MainActor in
+                    self.activeDownloads.removeValue(forKey: itemId)
                     switch result {
                     case .success(let url):
                         let fm = FileManager.default
@@ -347,13 +368,16 @@ class DownloadManager: ObservableObject {
                         downloadItem.errorMessage = error.localizedDescription
                     }
                     try? self.modelContext?.save()
+                    self.downloadStatusVersion = UUID()
                 }
                 continuation.resume()
             }
 
+            self.activeDownloads[itemId] = task
             task.start()
             downloadItem.downloadStatus = .downloading
             try? modelContext?.save()
+            self.downloadStatusVersion = UUID()
         }
     }
 
@@ -408,6 +432,25 @@ class DownloadManager: ObservableObject {
             modelContext?.delete(item)
             try? modelContext?.save()
         }
+    }
+
+    func deleteAlbumDownloads(albumId: String, serverId: String) {
+        guard let context = modelContext else { return }
+        let descriptor = FetchDescriptor<DownloadItem>(
+            predicate: #Predicate { $0.albumId == albumId && $0.serverId == serverId }
+        )
+        guard let items = try? context.fetch(descriptor) else { return }
+        for item in items {
+            if let path = item.localFilePath {
+                try? fileManager.removeItem(atPath: path)
+            }
+            if let artworkPath = item.artworkFilePath {
+                try? fileManager.removeItem(atPath: artworkPath)
+            }
+            modelContext?.delete(item)
+        }
+        try? modelContext?.save()
+        downloadStatusVersion = UUID()
     }
 
     func deleteAllDownloads(forServerId serverId: String) {
