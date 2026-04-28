@@ -146,6 +146,13 @@ struct ContentView: View {
                     makePopupItem()
                 }
         }
+        .popupBarStyle(.floatingCompact)
+        .popupCloseButtonStyle(.none)
+        .popupBarTitleTextAttributes(AttributeContainer().font(.systemFont(ofSize: 12, weight: .medium)))
+        .popupBarSubtitleTextAttributes(AttributeContainer().font(.systemFont(ofSize: 10)))
+        .popupBarCustomizer { popupBar in
+            popupBar.overrideUserInterfaceStyle = .light
+        }
     }
 }
 
