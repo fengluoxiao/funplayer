@@ -95,6 +95,28 @@ final class PlayerManager: ObservableObject {
         isLoading = true
         errorMessage = nil
 
+        // 优先检查本地是否有下载的文件
+        if let localURL = DownloadManager.shared.getLocalURL(itemId: item.id, serverId: server.id.uuidString) {
+            let fm = FileManager.default
+            if fm.fileExists(atPath: localURL.path) {
+                if let attrs = try? fm.attributesOfItem(atPath: localURL.path),
+                   let fileSize = attrs[.size] as? Int64 {
+                    print("[PlayerManager] Playing local file: \(localURL.path), size: \(fileSize) bytes")
+                }
+                Task {
+                    await setupAudioSession()
+                    await setupPlayer(url: localURL)
+                }
+                // 封面加载不阻塞播放
+                Task {
+                    await loadLocalArtwork(item: item, server: server)
+                }
+                return
+            } else {
+                print("[PlayerManager] Local file does not exist: \(localURL.path)")
+            }
+        }
+
         let client = JellyfinClient()
         client.serverConfig = server
 
@@ -294,9 +316,15 @@ final class PlayerManager: ObservableObject {
                 self.player?.play()
                 self.isPlaying = true
                 self.updateNowPlayingInfo()
+                print("[PlayerManager] Playback started, duration: \(self.duration)")
             case .failed:
                 self.isLoading = false
-                self.errorMessage = item.error?.localizedDescription ?? "Playback failed"
+                let errorDesc = item.error?.localizedDescription ?? "Unknown playback error"
+                self.errorMessage = errorDesc
+                print("[PlayerManager] Playback failed: \(errorDesc)")
+                if let error = item.error as NSError? {
+                    print("[PlayerManager] Error domain: \(error.domain), code: \(error.code)")
+                }
             default:
                 break
             }
@@ -365,12 +393,12 @@ final class PlayerManager: ObservableObject {
             if let image = UIImage(data: data) {
                 // 存入 ArtworkCache，供 popup bar 使用
                 ArtworkCache.shared.setImage(image, for: item.id)
-                
+
                 let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
                 var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
                 info[MPMediaItemPropertyArtwork] = artwork
                 MPNowPlayingInfoCenter.default().nowPlayingInfo = info
-                
+
                 if let dominantColor = extractDominantColor(from: image) {
                     await MainActor.run {
                         self.accentColor = dominantColor
@@ -379,6 +407,57 @@ final class PlayerManager: ObservableObject {
             }
         } catch {
             print("[PlayerManager] Artwork error: \(error)")
+        }
+    }
+
+    private func loadLocalArtwork(item: BaseItemDto, server: ServerConfig) async {
+        // 优先使用本地下载的封面
+        if let localArtworkURL = DownloadManager.shared.getLocalArtworkURL(itemId: item.id),
+           let data = try? Data(contentsOf: localArtworkURL),
+           let image = UIImage(data: data) {
+            ArtworkCache.shared.setImage(image, for: item.id)
+            let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+            var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
+            info[MPMediaItemPropertyArtwork] = artwork
+            MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+            if let dominantColor = extractDominantColor(from: image) {
+                await MainActor.run {
+                    self.accentColor = dominantColor
+                }
+            }
+            return
+        }
+
+        // 本地没有，尝试从服务器加载封面（在线时）
+        let client = JellyfinClient()
+        client.serverConfig = server
+        if let url = client.imageURL(itemId: item.id, maxWidth: 800) {
+            do {
+                let (data, _) = try await URLSession.shared.data(from: url)
+                if let image = UIImage(data: data) {
+                    ArtworkCache.shared.setImage(image, for: item.id)
+                    let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+                    var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
+                    info[MPMediaItemPropertyArtwork] = artwork
+                    MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+                    if let dominantColor = extractDominantColor(from: image) {
+                        await MainActor.run {
+                            self.accentColor = dominantColor
+                        }
+                    }
+                    return
+                }
+            } catch {
+                print("[PlayerManager] Local artwork server load error: \(error)")
+            }
+        }
+
+        // 都失败了，尝试使用缓存的封面
+        if let cachedImage = ArtworkCache.shared.image(for: item.id) {
+            let artwork = MPMediaItemArtwork(boundsSize: cachedImage.size) { _ in cachedImage }
+            var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
+            info[MPMediaItemPropertyArtwork] = artwork
+            MPNowPlayingInfoCenter.default().nowPlayingInfo = info
         }
     }
     

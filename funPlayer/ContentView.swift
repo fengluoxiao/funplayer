@@ -5,8 +5,8 @@
 
 import SwiftUI
 import SwiftData
-import LNPopupUI
 import Combine
+import LNPopupUI
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
@@ -33,6 +33,7 @@ struct ContentView: View {
         }
         .onAppear {
             FavoritesManager.shared.setup(with: modelContext)
+            DownloadManager.shared.setup(with: modelContext)
             initializeSelectedServer()
             preloadCurrentArtwork()
             Task {
@@ -141,13 +142,9 @@ struct ContentView: View {
             set: { _ in }
         ), isPopupOpen: $player.showFullScreenPlayer) {
             FullScreenPlayer()
-        }
-        .popupBarStyle(.floatingCompact)
-        .popupCloseButtonStyle(.none)
-        .popupBarTitleTextAttributes(AttributeContainer().font(.systemFont(ofSize: 12, weight: .medium)))
-        .popupBarSubtitleTextAttributes(AttributeContainer().font(.systemFont(ofSize: 10)))
-        .popupBarCustomizer { popupBar in
-            popupBar.overrideUserInterfaceStyle = .light
+                .popupItem {
+                    makePopupItem()
+                }
         }
     }
 }
@@ -155,6 +152,44 @@ struct ContentView: View {
 private func artistText() -> String {
     guard let item = PlayerManager.shared.currentItem else { return "" }
     return item.albumArtist ?? item.artists?.first ?? item.album ?? ""
+}
+
+private func makePopupItem() -> PopupItem<String, String, String, some ToolbarContent> {
+    let player = PlayerManager.shared
+    let item = player.currentItem
+    let title = item?.name ?? "Not Playing"
+    let subtitle = artistText()
+    let image = popupBarImage(for: item)
+
+    return PopupItem(id: item?.id ?? "noItem", title: title, subtitle: subtitle, image: image) {
+        ToolbarItem(placement: .popupBar) {
+            HStack(spacing: 20) {
+                Button {
+                    player.togglePlayPause()
+                } label: {
+                    Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                }
+                .frame(minWidth: 30)
+
+                Button {
+                    player.nextTrack()
+                } label: {
+                    Image(systemName: "forward.fill")
+                }
+                .frame(minWidth: 30)
+            }
+        }
+    }
+}
+
+private func popupBarImage(for item: BaseItemDto?) -> PopupItemImage? {
+    guard let item = item else { return nil }
+
+    if let cachedImage = ArtworkCache.shared.image(for: item.id) {
+        return PopupItemImage(Image(uiImage: cachedImage))
+    }
+
+    return nil
 }
 
 // MARK: - 欢迎页面（首次启动）
@@ -202,9 +237,26 @@ struct WelcomeView: View {
 struct HomeTabView: View {
     @StateObject private var appState = AppState.shared
     @StateObject private var client = JellyfinClient()
+    @StateObject private var downloadManager = DownloadManager.shared
     @State private var recentlyAdded: [BaseItemDto] = []
     @State private var recentlyPlayed: [BaseItemDto] = []
     @State private var isLoading = true
+
+    private var showDownloadedOnly: Bool {
+        appState.selectedServer?.showDownloadedOnly ?? false
+    }
+
+    private var filteredRecentlyPlayed: [BaseItemDto] {
+        guard showDownloadedOnly, let server = appState.selectedServer else { return recentlyPlayed }
+        let downloadedIds = downloadManager.getDownloadedItemIds(forServerId: server.id.uuidString)
+        return recentlyPlayed.filter { downloadedIds.contains($0.id) }
+    }
+
+    private var filteredRecentlyAdded: [BaseItemDto] {
+        guard showDownloadedOnly, let server = appState.selectedServer else { return recentlyAdded }
+        let downloadedIds = downloadManager.getDownloadedItemIds(forServerId: server.id.uuidString)
+        return recentlyAdded.filter { downloadedIds.contains($0.id) }
+    }
 
     var body: some View {
         ScrollView {
@@ -224,19 +276,31 @@ struct HomeTabView: View {
                     }
                     .padding(.top, 40)
                 } else {
-                    if !recentlyPlayed.isEmpty {
-                        homeSection(title: "最近播放", items: recentlyPlayed)
+                    if showDownloadedOnly {
+                        HStack {
+                            Image(systemName: "arrow.down.circle.fill")
+                                .foregroundStyle(.green)
+                            Text("只显示下载内容")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                        }
+                        .padding(.horizontal, 16)
                     }
 
-                    if !recentlyAdded.isEmpty {
-                        homeSection(title: "最近添加", items: recentlyAdded)
+                    if !filteredRecentlyPlayed.isEmpty {
+                        homeSection(title: "最近播放", items: filteredRecentlyPlayed)
                     }
 
-                    if recentlyPlayed.isEmpty && recentlyAdded.isEmpty {
+                    if !filteredRecentlyAdded.isEmpty {
+                        homeSection(title: "最近添加", items: filteredRecentlyAdded)
+                    }
+
+                    if filteredRecentlyPlayed.isEmpty && filteredRecentlyAdded.isEmpty {
                         ContentUnavailableView(
-                            "没有内容",
-                            systemImage: "music.note.house",
-                            description: Text("开始播放或向服务器添加媒体")
+                            showDownloadedOnly ? "没有下载的内容" : "没有内容",
+                            systemImage: showDownloadedOnly ? "arrow.down.circle" : "music.note.house",
+                            description: Text(showDownloadedOnly ? "您还没有下载任何内容" : "开始播放或向服务器添加媒体")
                         )
                         .padding(.top, 40)
                     }
@@ -260,6 +324,9 @@ struct HomeTabView: View {
             Task {
                 await loadData()
             }
+        }
+        .onReceive(downloadManager.objectWillChange) {
+            // Refresh when downloads change
         }
     }
 
@@ -285,7 +352,45 @@ struct HomeTabView: View {
             isLoading = false
             return
         }
+
         client.serverConfig = server
+
+        // 如果开启只显示下载内容，直接从本地下载记录加载，不请求服务器
+        if server.showDownloadedOnly {
+            isLoading = true
+            let downloadedItems = downloadManager.getDownloadedItems(forServerId: server.id.uuidString)
+            // 将下载记录转换为 BaseItemDto 用于展示
+            var items: [BaseItemDto] = []
+            for download in downloadedItems {
+                // 尝试获取完整的 item 信息（如果有缓存）
+                // 否则创建一个基本的 BaseItemDto
+                let dto = BaseItemDto(
+                    id: download.itemId,
+                    name: download.name,
+                    type: download.type,
+                    overview: nil,
+                    indexNumber: nil,
+                    parentIndexNumber: nil,
+                    seriesName: nil,
+                    album: nil,
+                    albumArtist: download.artist,
+                    artists: download.artist != nil ? [download.artist!] : nil,
+                    runTimeTicks: nil,
+                    userData: nil,
+                    primaryImageAspectRatio: nil,
+                    imageTags: nil,
+                    backdropImageTags: nil,
+                    mediaType: nil,
+                    collectionType: nil
+                )
+                items.append(dto)
+            }
+            recentlyAdded = items
+            recentlyPlayed = []
+            isLoading = false
+            return
+        }
+
         isLoading = true
         let libraryIds = appState.selectedLibraryIds
         do {
@@ -319,25 +424,37 @@ struct HomeItemCard: View {
     let item: BaseItemDto
     let client: JellyfinClient
     @StateObject private var player = PlayerManager.shared
+    @State private var localArtwork: UIImage?
 
     var body: some View {
         Button {
             playItem()
         } label: {
             VStack(alignment: .leading, spacing: 8) {
-                AsyncImage(url: client.imageURL(itemId: item.id, maxWidth: 300)) { phase in
-                    if let image = phase.image {
-                        image
+                Group {
+                    if let localImage = localArtwork {
+                        Image(uiImage: localImage)
                             .resizable()
                             .aspectRatio(contentMode: .fill)
-                    } else if phase.error != nil {
-                        Color.gray.opacity(0.3)
                     } else {
-                        Color.gray.opacity(0.15)
+                        AsyncImage(url: client.imageURL(itemId: item.id, maxWidth: 300)) { phase in
+                            if let image = phase.image {
+                                image
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fill)
+                            } else if phase.error != nil {
+                                Color.gray.opacity(0.3)
+                            } else {
+                                Color.gray.opacity(0.15)
+                            }
+                        }
                     }
                 }
                 .frame(width: 150, height: 150)
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .onAppear {
+                    loadLocalArtwork()
+                }
 
                 Text(item.name ?? "Unknown")
                     .font(.subheadline.bold())
@@ -371,10 +488,51 @@ struct HomeItemCard: View {
                     }
                 } catch {
                     print("[HomeItemCard] Error loading album tracks: \(error)")
+                    await playDownloadedTracks(server: server)
                 }
             }
         } else {
             player.playSingle(item: item, server: server)
+        }
+    }
+
+    private func playDownloadedTracks(server: ServerConfig) async {
+        let downloadedItems = DownloadManager.shared.getDownloadedItems(forServerId: server.id.uuidString)
+        guard !downloadedItems.isEmpty else {
+            ToastManager.shared.show("没有已下载的曲目")
+            return
+        }
+        var tracks: [BaseItemDto] = []
+        for download in downloadedItems {
+            let dto = BaseItemDto(
+                id: download.itemId,
+                name: download.name,
+                type: download.type,
+                overview: nil,
+                indexNumber: nil,
+                parentIndexNumber: nil,
+                seriesName: nil,
+                album: nil,
+                albumArtist: download.artist,
+                artists: download.artist != nil ? [download.artist!] : nil,
+                runTimeTicks: nil,
+                userData: nil,
+                primaryImageAspectRatio: nil,
+                imageTags: nil,
+                backdropImageTags: nil,
+                mediaType: nil,
+                collectionType: nil
+            )
+            tracks.append(dto)
+        }
+        player.play(queue: tracks, index: 0, server: server)
+    }
+
+    private func loadLocalArtwork() {
+        if let url = DownloadManager.shared.getLocalArtworkURL(itemId: item.id) {
+            if let data = try? Data(contentsOf: url) {
+                localArtwork = UIImage(data: data)
+            }
         }
     }
 }
@@ -411,10 +569,35 @@ enum LibraryCategory: String, CaseIterable, Identifiable {
 struct LibraryTabView: View {
     @StateObject private var appState = AppState.shared
     @StateObject private var client = JellyfinClient()
+    @StateObject private var downloadManager = DownloadManager.shared
     @State private var albums: [BaseItemDto] = []
     @State private var artists: [BaseItemDto] = []
     @State private var songs: [BaseItemDto] = []
     @State private var isLoading = true
+
+    private var showDownloadedOnly: Bool {
+        appState.selectedServer?.showDownloadedOnly ?? false
+    }
+
+    private var downloadedItemIds: Set<String> {
+        guard let server = appState.selectedServer else { return [] }
+        return downloadManager.getDownloadedItemIds(forServerId: server.id.uuidString)
+    }
+
+    private var filteredAlbums: [BaseItemDto] {
+        guard showDownloadedOnly else { return albums }
+        return albums.filter { downloadedItemIds.contains($0.id) }
+    }
+
+    private var filteredArtists: [BaseItemDto] {
+        guard showDownloadedOnly else { return artists }
+        return artists.filter { downloadedItemIds.contains($0.id) }
+    }
+
+    private var filteredSongs: [BaseItemDto] {
+        guard showDownloadedOnly else { return songs }
+        return songs.filter { downloadedItemIds.contains($0.id) }
+    }
 
     var body: some View {
         Group {
@@ -447,6 +630,9 @@ struct LibraryTabView: View {
                 await loadLibraryData()
             }
         }
+        .onReceive(downloadManager.objectWillChange) {
+            // Refresh when downloads change
+        }
     }
 
     private var libraryContent: some View {
@@ -460,6 +646,19 @@ struct LibraryTabView: View {
                     }
                     .padding(.top, 40)
                 } else {
+                    if showDownloadedOnly {
+                        HStack {
+                            Image(systemName: "arrow.down.circle.fill")
+                                .foregroundStyle(.green)
+                            Text("只显示下载内容")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 16)
+                    }
+
                     // Category List (Apple Music Style)
                     VStack(spacing: 0) {
                         ForEach(LibraryCategory.allCases) { category in
@@ -476,7 +675,7 @@ struct LibraryTabView: View {
                     .padding(.horizontal, 16)
 
                     // Recently Added Section (Albums)
-                    if !albums.isEmpty {
+                    if !filteredAlbums.isEmpty {
                         VStack(alignment: .leading, spacing: 12) {
                             Text("最近添加")
                                 .font(.title2.bold())
@@ -485,7 +684,7 @@ struct LibraryTabView: View {
 
                             ScrollView(.vertical, showsIndicators: false) {
                                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 16), GridItem(.flexible(), spacing: 16)], spacing: 16) {
-                                    ForEach(albums.prefix(10)) { item in
+                                    ForEach(filteredAlbums.prefix(10)) { item in
                                         LibraryAlbumCard(item: item, client: client)
                                     }
                                 }
@@ -515,11 +714,11 @@ struct LibraryTabView: View {
         case .playlists:
             return []
         case .artists:
-            return artists
+            return filteredArtists
         case .albums:
-            return albums
+            return filteredAlbums
         case .songs:
-            return songs
+            return filteredSongs
         }
     }
 
@@ -541,7 +740,48 @@ struct LibraryTabView: View {
             isLoading = false
             return
         }
+
         client.serverConfig = server
+
+        // 如果开启只显示下载内容，直接从本地下载记录加载，不请求服务器
+        if server.showDownloadedOnly {
+            isLoading = true
+            let downloadedItems = downloadManager.getDownloadedItems(forServerId: server.id.uuidString)
+            var allAlbums: [BaseItemDto] = []
+            var allSongs: [BaseItemDto] = []
+            for download in downloadedItems {
+                let dto = BaseItemDto(
+                    id: download.itemId,
+                    name: download.name,
+                    type: download.type,
+                    overview: nil,
+                    indexNumber: nil,
+                    parentIndexNumber: nil,
+                    seriesName: nil,
+                    album: nil,
+                    albumArtist: download.artist,
+                    artists: download.artist != nil ? [download.artist!] : nil,
+                    runTimeTicks: nil,
+                    userData: nil,
+                    primaryImageAspectRatio: nil,
+                    imageTags: nil,
+                    backdropImageTags: nil,
+                    mediaType: nil,
+                    collectionType: nil
+                )
+                if download.type == "MusicAlbum" {
+                    allAlbums.append(dto)
+                } else {
+                    allSongs.append(dto)
+                }
+            }
+            albums = allAlbums
+            artists = []
+            songs = allSongs
+            isLoading = false
+            return
+        }
+
         isLoading = true
 
         var allAlbums: [BaseItemDto] = []
@@ -649,25 +889,38 @@ struct LibraryAlbumCard: View {
     let item: BaseItemDto
     let client: JellyfinClient
     @StateObject private var player = PlayerManager.shared
+    @StateObject private var downloadManager = DownloadManager.shared
+    @State private var localArtwork: UIImage?
 
     var body: some View {
         Button {
             playItem()
         } label: {
             VStack(alignment: .leading, spacing: 6) {
-                AsyncImage(url: client.imageURL(itemId: item.id, maxWidth: 300)) { phase in
-                    if let image = phase.image {
-                        image
+                Group {
+                    if let localImage = localArtwork {
+                        Image(uiImage: localImage)
                             .resizable()
                             .aspectRatio(contentMode: .fill)
-                    } else if phase.error != nil {
-                        Color.gray.opacity(0.3)
                     } else {
-                        Color.gray.opacity(0.15)
+                        AsyncImage(url: client.imageURL(itemId: item.id, maxWidth: 300)) { phase in
+                            if let image = phase.image {
+                                image
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fill)
+                            } else if phase.error != nil {
+                                Color.gray.opacity(0.3)
+                            } else {
+                                Color.gray.opacity(0.15)
+                            }
+                        }
                     }
                 }
                 .frame(width: 160, height: 160)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .onAppear {
+                    loadLocalArtwork()
+                }
 
                 Text(item.name ?? "Unknown")
                     .font(.subheadline.weight(.medium))
@@ -690,6 +943,32 @@ struct LibraryAlbumCard: View {
             }
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            if item.type == "MusicAlbum", let server = client.serverConfig {
+                let isDownloaded = downloadManager.isDownloaded(itemId: item.id, serverId: server.id.uuidString)
+                let isDownloading = downloadManager.isDownloading(itemId: item.id)
+
+                if isDownloading {
+                    Button {
+                        downloadManager.cancelDownload(itemId: item.id)
+                    } label: {
+                        Label("取消下载", systemImage: "xmark.circle")
+                    }
+                } else if isDownloaded {
+                    Button {
+                        downloadManager.deleteDownload(itemId: item.id, serverId: server.id.uuidString)
+                    } label: {
+                        Label("删除下载", systemImage: "trash")
+                    }
+                } else {
+                    Button {
+                        downloadManager.downloadAlbum(item: item, server: server)
+                    } label: {
+                        Label("下载专辑", systemImage: "arrow.down.circle")
+                    }
+                }
+            }
+        }
     }
 
     private func playItem() {
@@ -707,10 +986,53 @@ struct LibraryAlbumCard: View {
                     }
                 } catch {
                     print("[LibraryAlbumCard] Error loading album tracks: \(error)")
+                    // 离线时尝试播放专辑中已下载的曲目
+                    await playDownloadedAlbumTracks(server: server)
                 }
             }
         } else {
             player.playSingle(item: item, server: server)
+        }
+    }
+
+    private func playDownloadedAlbumTracks(server: ServerConfig) async {
+        let downloadedItems = DownloadManager.shared.getDownloadedItems(forServerId: server.id.uuidString)
+        // 这里无法精确匹配专辑下的曲目，所以播放所有已下载的曲目作为 fallback
+        guard !downloadedItems.isEmpty else {
+            ToastManager.shared.show("没有已下载的曲目")
+            return
+        }
+        var tracks: [BaseItemDto] = []
+        for download in downloadedItems {
+            let dto = BaseItemDto(
+                id: download.itemId,
+                name: download.name,
+                type: download.type,
+                overview: nil,
+                indexNumber: nil,
+                parentIndexNumber: nil,
+                seriesName: nil,
+                album: nil,
+                albumArtist: download.artist,
+                artists: download.artist != nil ? [download.artist!] : nil,
+                runTimeTicks: nil,
+                userData: nil,
+                primaryImageAspectRatio: nil,
+                imageTags: nil,
+                backdropImageTags: nil,
+                mediaType: nil,
+                collectionType: nil
+            )
+            tracks.append(dto)
+        }
+        player.play(queue: tracks, index: 0, server: server)
+    }
+
+    private func loadLocalArtwork() {
+        if let url = DownloadManager.shared.getLocalArtworkURL(itemId: item.id) {
+            if let data = try? Data(contentsOf: url) {
+                localArtwork = UIImage(data: data)
+            }
         }
     }
 }
@@ -759,7 +1081,7 @@ struct LibraryCategoryView: View {
                             Button {
                                 PlayerManager.shared.playSingle(item: item, server: server)
                             } label: {
-                                MediaRow(item: item, client: makeClient())
+                                MediaRow(item: item, client: makeClient(), server: server)
                             }
                             .buttonStyle(.plain)
                         }
@@ -1058,6 +1380,25 @@ struct SettingsTabView: View {
                             showDirectPlayAlert = true
                         }
                     ))
+                }
+
+                Section(String(localized: "下载设置")) {
+                    Toggle(String(localized: "只显示下载内容"), isOn: Binding(
+                        get: { selected.showDownloadedOnly },
+                        set: { newValue in
+                            selected.showDownloadedOnly = newValue
+                            try? modelContext.save()
+                            appState.objectWillChange.send()
+                        }
+                    ))
+
+                    NavigationLink(destination: DownloadsView()) {
+                        HStack {
+                            Image(systemName: "arrow.down.circle")
+                            Text("下载管理")
+                            Spacer()
+                        }
+                    }
                 }
             }
 
@@ -1750,5 +2091,5 @@ struct FavoriteRow: View {
 
 #Preview {
     ContentView()
-        .modelContainer(for: [ServerConfig.self, FavoriteItem.self], inMemory: true)
+        .modelContainer(for: [ServerConfig.self, FavoriteItem.self, DownloadItem.self], inMemory: true)
 }

@@ -272,6 +272,12 @@ class JellyfinClient: ObservableObject {
         return URL(string: base.absoluteString + path)
     }
 
+    func downloadURL(itemId: String) -> URL? {
+        guard let base = baseURL else { return nil }
+        let path = "/Items/\(itemId)/Download"
+        return URL(string: base.absoluteString + path)
+    }
+
     // MARK: - Favorite
 
     func addFavorite(itemId: String) async throws -> UserData {

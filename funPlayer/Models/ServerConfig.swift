@@ -20,6 +20,7 @@ final class ServerConfig {
     var selectedLibraryIds: [String]
     var enableDirectPlay: Bool
     var lastAutoSwitchedURL: String?
+    var showDownloadedOnly: Bool
 
     init(
         name: String,
@@ -42,6 +43,7 @@ final class ServerConfig {
         self.selectedLibraryIds = []
         self.enableDirectPlay = false
         self.lastAutoSwitchedURL = nil
+        self.showDownloadedOnly = false
     }
 
     var isAuthenticated: Bool {

@@ -12,6 +12,7 @@ struct funPlayerApp: App {
         let schema = Schema([
             ServerConfig.self,
             FavoriteItem.self,
+            DownloadItem.self,
         ])
         let modelConfiguration = ModelConfiguration(
             schema: schema,

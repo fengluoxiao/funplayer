@@ -44,26 +44,7 @@ struct FullScreenPlayer: View {
                 .presentationDragIndicator(.visible)
                 .presentationBackgroundInteraction(.enabled)
         }
-        .popupTitle(player.currentItem?.name ?? "未知", subtitle: artistText())
-        .popupImage(artworkImage(), resizable: true, aspectRatio: 1.0, contentMode: .fill)
-        .popupProgress(Float(player.progress))
-        .popupBarButtons {
-            Button {
-                player.togglePlayPause()
-            } label: {
-                Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                    .font(.system(size: 20))
-            }
-            .buttonStyle(.plain)
 
-            Button {
-                player.nextTrack()
-            } label: {
-                Image(systemName: "forward.fill")
-                    .font(.system(size: 16))
-            }
-            .buttonStyle(.plain)
-        }
     }
 
     @ViewBuilder
@@ -146,6 +127,7 @@ struct FullScreenPlayer: View {
     @ViewBuilder
     private func favoriteButton() -> some View {
         let isFav = favorites.isFavorite(itemId: player.currentItem?.id ?? "")
+        let isLocalFile = isPlayingLocalFile()
         Button {
             guard let item = player.currentItem, let server = player.currentServer else { return }
             let appState = AppState.shared
@@ -155,9 +137,15 @@ struct FullScreenPlayer: View {
         } label: {
             Image(systemName: isFav ? "heart.fill" : "heart")
                 .font(.system(size: 24))
-                .foregroundStyle(isFav ? .red : accentColor)
+                .foregroundStyle(isFav ? .red : (isLocalFile ? accentColor.opacity(0.3) : accentColor))
                 .frame(maxWidth: .infinity)
         }
+        .disabled(isLocalFile)
+    }
+
+    private func isPlayingLocalFile() -> Bool {
+        guard let item = player.currentItem, let server = player.currentServer else { return false }
+        return DownloadManager.shared.isDownloaded(itemId: item.id, serverId: server.id.uuidString)
     }
 
     @ViewBuilder
@@ -286,7 +274,11 @@ struct FullScreenPlayer: View {
     private func artworkView() -> some View {
         let w = screenBounds.width
         Group {
-            if let url = artworkURL() {
+            if let cachedImage = artworkImage() {
+                cachedImage
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            } else if let url = artworkURL() {
                 AsyncImage(url: url) { phase in
                     if let image = phase.image {
                         image.resizable().aspectRatio(contentMode: .fill)
@@ -318,7 +310,15 @@ struct FullScreenPlayer: View {
         let w = screenBounds.width
         let h = screenBounds.height
         Group {
-            if let url = artworkURL() {
+            if let cachedImage = ArtworkCache.shared.image(for: player.currentItem?.id ?? "") {
+                Image(uiImage: cachedImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: w, height: h)
+                    .clipped()
+                    .blur(radius: 60)
+                    .overlay(Color.white.opacity(0.7))
+            } else if let url = artworkURL() {
                 AsyncImage(url: url) { phase in
                     if let image = phase.image {
                         image

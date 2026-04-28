@@ -41,7 +41,7 @@ struct CombinedLibraryView: View {
                         Button {
                             PlayerManager.shared.playSingle(item: item, server: server)
                         } label: {
-                            MediaRow(item: item, client: client)
+                            MediaRow(item: item, client: client, server: server)
                         }
                         .buttonStyle(.plain)
                     }
@@ -143,22 +143,36 @@ struct LibraryView: View {
 struct MediaRow: View {
     let item: BaseItemDto
     let client: JellyfinClient
+    var server: ServerConfig?
+    @State private var localArtwork: UIImage?
+    @ObservedObject private var downloadManager = DownloadManager.shared
 
     var body: some View {
         HStack(spacing: 12) {
-            AsyncImage(url: client.imageURL(itemId: item.id, maxWidth: 200)) { phase in
-                if let image = phase.image {
-                    image
+            Group {
+                if let localImage = localArtwork {
+                    Image(uiImage: localImage)
                         .resizable()
                         .aspectRatio(contentMode: .fill)
-                } else if phase.error != nil {
-                    Color.gray.opacity(0.3)
                 } else {
-                    Color.gray.opacity(0.15)
+                    AsyncImage(url: client.imageURL(itemId: item.id, maxWidth: 200)) { phase in
+                        if let image = phase.image {
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                        } else if phase.error != nil {
+                            Color.gray.opacity(0.3)
+                        } else {
+                            Color.gray.opacity(0.15)
+                        }
+                    }
                 }
             }
             .frame(width: 80, height: 80)
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .onAppear {
+                loadLocalArtwork()
+            }
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.name ?? "未知")
@@ -182,8 +196,38 @@ struct MediaRow: View {
                         .foregroundStyle(.secondary)
                 }
             }
+
+            Spacer()
         }
         .padding(.vertical, 4)
+        .contextMenu {
+            if let server = server, item.type == "Audio" || item.type == "Episode" || item.type == "Movie" {
+                let isDownloaded = downloadManager.isDownloaded(itemId: item.id, serverId: server.id.uuidString)
+                let isDownloading = downloadManager.isDownloading(itemId: item.id)
+                if isDownloading {
+                    Button {
+                        downloadManager.cancelDownload(itemId: item.id)
+                        ToastManager.shared.show("已取消下载")
+                    } label: {
+                        Label("取消下载", systemImage: "xmark.circle")
+                    }
+                } else if isDownloaded {
+                    Button(role: .destructive) {
+                        downloadManager.deleteDownload(itemId: item.id, serverId: server.id.uuidString)
+                        ToastManager.shared.show("已删除下载")
+                    } label: {
+                        Label("删除下载", systemImage: "trash")
+                    }
+                } else {
+                    Button {
+                        downloadManager.download(item: item, server: server)
+                        ToastManager.shared.show("开始下载")
+                    } label: {
+                        Label("下载", systemImage: "arrow.down.circle")
+                    }
+                }
+            }
+        }
     }
 
     private func formatTicks(_ ticks: Int64) -> String {
@@ -195,6 +239,14 @@ struct MediaRow: View {
             return String(format: "%d:%02d:%02d", hrs, remMins, seconds % 60)
         } else {
             return String(format: "%d:%02d", mins, seconds % 60)
+        }
+    }
+
+    private func loadLocalArtwork() {
+        if let url = DownloadManager.shared.getLocalArtworkURL(itemId: item.id) {
+            if let data = try? Data(contentsOf: url) {
+                localArtwork = UIImage(data: data)
+            }
         }
     }
 }
@@ -370,7 +422,7 @@ struct FolderView: View {
                         Button {
                             PlayerManager.shared.playSingle(item: item, server: server)
                         } label: {
-                            MediaRow(item: item, client: client)
+                            MediaRow(item: item, client: client, server: server)
                         }
                         .buttonStyle(.plain)
                     }
@@ -481,7 +533,7 @@ struct EpisodeListView: View {
                             PlayerManager.shared.play(queue: items, index: index, server: server)
                         }
                     } label: {
-                        MediaRow(item: item, client: client)
+                        MediaRow(item: item, client: client, server: server)
                     }
                     .buttonStyle(.plain)
                 }
@@ -558,13 +610,20 @@ struct AlbumTrackListView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 if let item = albumItem {
                     let isFav = favorites.isFavorite(itemId: item.id)
+                    let isLocalAlbum = DownloadManager.shared.isDownloaded(itemId: item.id, serverId: server.id.uuidString)
                     Button {
                         favorites.toggleFavorite(item: item, server: server, libraryIds: appState.selectedLibraryIds, type: .album)
                     } label: {
                         Image(systemName: isFav ? "heart.fill" : "heart")
                             .font(.system(size: 20, weight: .semibold))
-                            .foregroundStyle(isFav ? .red : .primary)
+                            .foregroundStyle(isFav ? .red : (isLocalAlbum ? .primary.opacity(0.3) : .primary))
                     }
+                    .disabled(isLocalAlbum)
+                }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                if let item = albumItem {
+                    AlbumDownloadButton(item: item, server: server)
                 }
             }
         }
@@ -590,7 +649,17 @@ struct AlbumTrackListView: View {
     @ViewBuilder
     private func artworkView(width: CGFloat) -> some View {
         Group {
-            if let url = albumArtworkURL() {
+            if let cachedImage = ArtworkCache.shared.image(for: albumId) {
+                Image(uiImage: cachedImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            } else if let localArtworkURL = DownloadManager.shared.getLocalArtworkURL(itemId: albumId),
+                      let data = try? Data(contentsOf: localArtworkURL),
+                      let image = UIImage(data: data) {
+                Image(uiImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            } else if let url = albumArtworkURL() {
                 AsyncImage(url: url) { phase in
                     if let image = phase.image {
                         image.resizable().aspectRatio(contentMode: .fill)
@@ -653,7 +722,9 @@ struct AlbumTrackListView: View {
                             title: item.name ?? "未知",
                             artist: item.artists?.first ?? item.albumArtist ?? "",
                             duration: item.runTimeTicks,
-                            accentColor: accentColor
+                            accentColor: accentColor,
+                            item: item,
+                            server: server
                         )
                     }
                     .buttonStyle(.plain)
@@ -669,7 +740,25 @@ struct AlbumTrackListView: View {
             let width = proxy.size.width
             let height = proxy.size.height
             Group {
-                if let url = albumArtworkURL() {
+                if let cachedImage = ArtworkCache.shared.image(for: albumId) {
+                    Image(uiImage: cachedImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: width, height: height)
+                        .clipped()
+                        .blur(radius: 60)
+                        .overlay(Color.white.opacity(0.7))
+                } else if let localArtworkURL = DownloadManager.shared.getLocalArtworkURL(itemId: albumId),
+                          let data = try? Data(contentsOf: localArtworkURL),
+                          let image = UIImage(data: data) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: width, height: height)
+                        .clipped()
+                        .blur(radius: 60)
+                        .overlay(Color.white.opacity(0.7))
+                } else if let url = albumArtworkURL() {
                     AsyncImage(url: url) { phase in
                         if let image = phase.image {
                             image
@@ -788,6 +877,84 @@ struct TrackRow: View {
     let artist: String
     let duration: Int64?
     let accentColor: Color
+    var item: BaseItemDto?
+    var server: ServerConfig?
+    @ObservedObject private var downloadManager = DownloadManager.shared
+    @ObservedObject private var favorites = FavoritesManager.shared
+
+    private var menuItems: [CustomMenuItem] {
+        guard let item = item, let server = server else { return [] }
+        let isDownloaded = downloadManager.isDownloaded(itemId: item.id, serverId: server.id.uuidString)
+        let isDownloading = downloadManager.isDownloading(itemId: item.id)
+        let isFav = favorites.isFavorite(itemId: item.id)
+
+        var items: [CustomMenuItem] = []
+
+        items.append(CustomMenuItem(
+            title: isFav ? "取消喜爱" : "喜爱",
+            systemImage: isFav ? "star.slash.fill" : "star.fill",
+            isDestructive: false
+        ) {
+            let appState = AppState.shared
+            let type: FavoriteType = item.type == "MusicAlbum" ? .album : .track
+            favorites.toggleFavorite(item: item, server: server, libraryIds: appState.selectedLibraryIds, type: type)
+        })
+
+        if isDownloading {
+            items.append(CustomMenuItem(
+                title: "取消下载",
+                systemImage: "xmark.circle.fill",
+                isDestructive: false
+            ) {
+                downloadManager.cancelDownload(itemId: item.id)
+                ToastManager.shared.show("已取消下载")
+            })
+        } else if isDownloaded {
+            items.append(CustomMenuItem(
+                title: "删除下载",
+                systemImage: "trash.fill",
+                isDestructive: true
+            ) {
+                downloadManager.deleteDownload(itemId: item.id, serverId: server.id.uuidString)
+                ToastManager.shared.show("已删除下载")
+            })
+        } else {
+            items.append(CustomMenuItem(
+                title: "下载",
+                systemImage: "arrow.down.circle.fill",
+                isDestructive: false
+            ) {
+                downloadManager.download(item: item, server: server)
+                ToastManager.shared.show("开始下载")
+            })
+        }
+
+        items.append(CustomMenuItem(
+            title: "添加到播放列表",
+            systemImage: "text.badge.plus",
+            isDestructive: false
+        ) {
+            // TODO: Implement add to playlist
+        })
+
+        items.append(CustomMenuItem(
+            title: "插播",
+            systemImage: "text.line.first.and.arrowtriangle.forward",
+            isDestructive: false
+        ) {
+            // TODO: Implement play next
+        })
+
+        items.append(CustomMenuItem(
+            title: "随后播放",
+            systemImage: "text.line.last.and.arrowtriangle.forward",
+            isDestructive: false
+        ) {
+            // TODO: Implement play later
+        })
+
+        return items
+    }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -811,6 +978,9 @@ struct TrackRow: View {
             }
 
             Spacer()
+
+            MenuButton(menuItems: menuItems)
+                .frame(width: 32, height: 32)
 
             if let ticks = duration {
                 Text(formatTicks(ticks))
