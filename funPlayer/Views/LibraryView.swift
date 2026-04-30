@@ -656,16 +656,20 @@ struct AlbumTrackListView: View {
 
     private func loadAlbumTracks() async {
         isLoading = true
-        do {
-            albumItem = try await client.getItem(itemId: albumId)
-            items = try await client.getItems(parentId: albumId, includeItemTypes: "Audio", sortBy: "ParentIndexNumber,IndexNumber")
-            await loadAccentColor()
-        } catch {
-            print("[AlbumTrackListView] Error loading items: \(error)")
-            // 离线时从本地加载已下载的曲目
+        let showDownloadedOnly = appState.selectedServer?.showDownloadedOnly ?? false
+        if showDownloadedOnly {
             await loadLocalAlbumTracks()
-            // 离线时从本地封面取色
             await loadLocalAccentColor()
+        } else {
+            do {
+                albumItem = try await client.getItem(itemId: albumId)
+                items = try await client.getItems(parentId: albumId, includeItemTypes: "Audio", sortBy: "ParentIndexNumber,IndexNumber")
+                await loadAccentColor()
+            } catch {
+                print("[AlbumTrackListView] Error loading items: \(error)")
+                await loadLocalAlbumTracks()
+                await loadLocalAccentColor()
+            }
         }
         isLoading = false
     }
