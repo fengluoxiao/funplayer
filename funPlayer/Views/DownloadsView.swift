@@ -11,6 +11,7 @@ struct DownloadsView: View {
     @StateObject private var appState = AppState.shared
     @Query(sort: \DownloadItem.downloadDate, order: .reverse) private var allDownloads: [DownloadItem]
     @Environment(\.modelContext) private var modelContext
+    @Binding var path: NavigationPath
 
     private var serverDownloads: [DownloadItem] {
         guard let server = appState.selectedServer else { return [] }
@@ -82,7 +83,13 @@ struct DownloadsView: View {
 
                     Button(role: .destructive) {
                         if let server = appState.selectedServer {
+                            // 清掉所有播放状态
+                            PlayerManager.shared.stop()
                             downloadManager.deleteAllDownloads(forServerId: server.id.uuidString)
+                            // 返回上一级
+                            if !path.isEmpty {
+                                path.removeLast()
+                            }
                         }
                     } label: {
                         Text("清除所有下载")
@@ -162,6 +169,10 @@ struct DownloadedRow: View {
                 .foregroundStyle(.green)
 
             Button {
+                // 如果正在播放这首歌，先停止播放
+                if PlayerManager.shared.currentItem?.id == item.itemId {
+                    PlayerManager.shared.stop()
+                }
                 downloadManager.deleteDownload(itemId: item.itemId, serverId: item.serverId)
             } label: {
                 Image(systemName: "trash")

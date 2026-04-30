@@ -9,6 +9,7 @@ import Combine
 struct AlbumDownloadButton: View {
     let item: BaseItemDto
     let server: ServerConfig
+    var onDelete: (() -> Void)?
     @ObservedObject private var downloadManager = DownloadManager.shared
 
     private var serverId: String { server.id.uuidString }
@@ -46,8 +47,14 @@ struct AlbumDownloadButton: View {
             downloadManager.cancelDownload(itemId: item.id)
             ToastManager.shared.show("已取消下载")
         } else if isDownloaded {
+            // 如果正在播放该专辑的歌曲，先停止播放
+            if let currentItem = PlayerManager.shared.currentItem,
+               currentItem.albumId == item.id || currentItem.id == item.id {
+                PlayerManager.shared.stop()
+            }
             downloadManager.deleteAlbumDownloads(albumId: item.id, serverId: serverId)
             ToastManager.shared.show("已删除下载")
+            onDelete?()
         } else {
             downloadManager.downloadAlbum(item: item, server: server)
         }

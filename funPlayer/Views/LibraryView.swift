@@ -9,6 +9,7 @@ import UIKit
 struct CombinedLibraryView: View {
     let server: ServerConfig
     let libraryIds: [String]
+    @Binding var path: NavigationPath
     @StateObject private var client = JellyfinClient()
     @State private var items: [BaseItemDto] = []
     @State private var isLoading = true
@@ -34,7 +35,7 @@ struct CombinedLibraryView: View {
                             MediaRow(item: item, client: client)
                         }
                     } else if item.type == "MusicAlbum" {
-                        NavigationLink(destination: AlbumTrackListView(server: server, albumId: item.id, title: item.name ?? "专辑")) {
+                        NavigationLink(destination: AlbumTrackListView(server: server, albumId: item.id, title: item.name ?? "专辑", path: $path)) {
                             MediaRow(item: item, client: client)
                         }
                     } else {
@@ -87,6 +88,7 @@ struct CombinedLibraryView: View {
 
 struct LibraryView: View {
     let server: ServerConfig
+    @Binding var path: NavigationPath
     @StateObject private var client = JellyfinClient()
     @State private var items: [BaseItemDto] = []
     @State private var isLoading = true
@@ -104,7 +106,7 @@ struct LibraryView: View {
             } else {
                 ForEach(items) { item in
                     if item.type == "CollectionFolder" || item.type == "Folder" {
-                        NavigationLink(destination: FolderView(server: server, parentId: item.id, title: item.name ?? "资料库")) {
+                        NavigationLink(destination: FolderView(server: server, parentId: item.id, title: item.name ?? "资料库", path: $path)) {
                             MediaRow(item: item, client: client)
                         }
                     } else {
@@ -409,6 +411,7 @@ struct FolderView: View {
     let server: ServerConfig
     let parentId: String
     let title: String
+    @Binding var path: NavigationPath
     @StateObject private var client = JellyfinClient()
     @State private var items: [BaseItemDto] = []
     @State private var isLoading = true
@@ -434,7 +437,7 @@ struct FolderView: View {
                             MediaRow(item: item, client: client)
                         }
                     } else if item.type == "MusicAlbum" {
-                        NavigationLink(destination: AlbumTrackListView(server: server, albumId: item.id, title: item.name ?? "专辑")) {
+                        NavigationLink(destination: AlbumTrackListView(server: server, albumId: item.id, title: item.name ?? "专辑", path: $path)) {
                             MediaRow(item: item, client: client)
                         }
                     } else {
@@ -585,6 +588,7 @@ struct AlbumTrackListView: View {
     let server: ServerConfig
     let albumId: String
     let title: String
+    @Binding var path: NavigationPath
     @StateObject private var client = JellyfinClient()
     @StateObject private var favorites = FavoritesManager.shared
     @StateObject private var appState = AppState.shared
@@ -592,7 +596,7 @@ struct AlbumTrackListView: View {
     @State private var albumItem: BaseItemDto?
     @State private var isLoading = true
     @State private var accentColor: Color = Color(UIColor.systemBlue)
-    @Environment(\.dismiss) private var dismiss
+    @Environment(\.presentationMode) private var presentationMode
 
     var body: some View {
         ZStack {
@@ -643,7 +647,13 @@ struct AlbumTrackListView: View {
             }
             ToolbarItem(placement: .topBarTrailing) {
                 if let item = albumItem {
-                    AlbumDownloadButton(item: item, server: server)
+                    AlbumDownloadButton(item: item, server: server, onDelete: {
+                        if !path.isEmpty {
+                            path.removeLast()
+                        } else {
+                            presentationMode.wrappedValue.dismiss()
+                        }
+                    })
                 }
             }
         }

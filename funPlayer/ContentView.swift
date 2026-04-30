@@ -112,21 +112,17 @@ struct ContentView: View {
 
     private var mainTabView: some View {
         TabView(selection: $selectedTab) {
-            NavigationStack {
-                HomeTabView()
-            }
-            .tabItem {
-                Label("主页", systemImage: "house.fill")
-            }
-            .tag(0)
+            HomeTabView()
+                .tabItem {
+                    Label("主页", systemImage: "house.fill")
+                }
+                .tag(0)
 
-            NavigationStack {
-                LibraryTabView()
-            }
-            .tabItem {
-                Label("资料库", systemImage: "square.stack.fill")
-            }
-            .tag(1)
+            LibraryTabView()
+                .tabItem {
+                    Label("资料库", systemImage: "square.stack.fill")
+                }
+                .tag(1)
 
             NavigationStack {
                 SettingsTabView(showAddServer: $showAddServer)
@@ -257,6 +253,7 @@ struct HomeTabView: View {
     @State private var recentlyAdded: [BaseItemDto] = []
     @State private var recentlyPlayed: [BaseItemDto] = []
     @State private var isLoading = true
+    @State private var path = NavigationPath()
 
     private var showDownloadedOnly: Bool {
         appState.selectedServer?.showDownloadedOnly ?? false
@@ -275,74 +272,86 @@ struct HomeTabView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                if appState.selectedServer == nil {
-                    ContentUnavailableView(
-                        "未选择服务器",
-                        systemImage: "server.rack",
-                        description: Text("请在设置中选择服务器")
-                    )
-                    .padding(.top, 40)
-                } else if isLoading {
-                    HStack {
-                        Spacer()
-                        ProgressView()
-                        Spacer()
-                    }
-                    .padding(.top, 40)
-                } else {
-                    if showDownloadedOnly {
-                        HStack {
-                            Image(systemName: "arrow.down.circle.fill")
-                                .foregroundStyle(.green)
-                            Text("只显示下载内容")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                        }
-                        .padding(.horizontal, 16)
-                    }
-
-                    if !filteredRecentlyPlayed.isEmpty {
-                        homeSection(title: "最近播放", items: filteredRecentlyPlayed)
-                    }
-
-                    if !filteredRecentlyAdded.isEmpty {
-                        homeSection(title: "最近添加", items: filteredRecentlyAdded)
-                    }
-
-                    if filteredRecentlyPlayed.isEmpty && filteredRecentlyAdded.isEmpty {
+        NavigationStack(path: $path) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    if appState.selectedServer == nil {
                         ContentUnavailableView(
-                            showDownloadedOnly ? "没有下载的内容" : "没有内容",
-                            systemImage: showDownloadedOnly ? "arrow.down.circle" : "music.note.house",
-                            description: Text(showDownloadedOnly ? "您还没有下载任何内容" : "开始播放或向服务器添加媒体")
+                            "未选择服务器",
+                            systemImage: "server.rack",
+                            description: Text("请在设置中选择服务器")
                         )
                         .padding(.top, 40)
+                    } else if isLoading {
+                        HStack {
+                            Spacer()
+                            ProgressView()
+                            Spacer()
+                        }
+                        .padding(.top, 40)
+                    } else {
+                        if showDownloadedOnly {
+                            HStack {
+                                Image(systemName: "arrow.down.circle.fill")
+                                    .foregroundStyle(.green)
+                                Text("只显示下载内容")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                            }
+                            .padding(.horizontal, 16)
+                        }
+
+                        if !filteredRecentlyPlayed.isEmpty {
+                            homeSection(title: "最近播放", items: filteredRecentlyPlayed)
+                        }
+
+                        if !filteredRecentlyAdded.isEmpty {
+                            homeSection(title: "最近添加", items: filteredRecentlyAdded)
+                        }
+
+                        if filteredRecentlyPlayed.isEmpty && filteredRecentlyAdded.isEmpty {
+                            ContentUnavailableView(
+                                showDownloadedOnly ? "没有下载的内容" : "没有内容",
+                                systemImage: showDownloadedOnly ? "arrow.down.circle" : "music.note.house",
+                                description: Text(showDownloadedOnly ? "您还没有下载任何内容" : "开始播放或向服务器添加媒体")
+                            )
+                            .padding(.top, 40)
+                        }
                     }
                 }
+                .padding(.vertical, 16)
             }
-            .padding(.vertical, 16)
-        }
-        .navigationTitle("主页")
-        .task {
-            await loadData()
-        }
-        .refreshable {
-            await loadData()
-        }
-        .onChange(of: appState.selectedServer) {
-            Task {
+            .navigationTitle("主页")
+            .navigationDestination(for: BaseItemDto.self) { item in
+                if item.type == "MusicAlbum" {
+                    AlbumTrackListView(
+                        server: appState.selectedServer!,
+                        albumId: item.id,
+                        title: item.name ?? "专辑",
+                        path: $path
+                    )
+                }
+            }
+            .task {
                 await loadData()
             }
-        }
-        .onChange(of: appState.selectedLibraryIds) {
-            Task {
+            .refreshable {
                 await loadData()
             }
-        }
-        .onReceive(downloadManager.objectWillChange) {
-            // Refresh when downloads change
+            .onChange(of: appState.selectedServer) {
+                Task {
+                    await loadData()
+                }
+            }
+            .onChange(of: appState.selectedLibraryIds) {
+                Task {
+                    await loadData()
+                }
+            }
+            .onReceive(downloadManager.objectWillChange) {
+                // Refresh when downloads change
+            }
         }
     }
 
@@ -490,9 +499,7 @@ struct HomeItemCard: View {
         .contentShape(Rectangle())
 
         if isAlbum, let server = client.serverConfig {
-            NavigationLink {
-                AlbumTrackListView(server: server, albumId: item.id, title: item.name ?? "专辑")
-            } label: {
+            NavigationLink(value: item) {
                 content
             }
             .buttonStyle(.plain)
@@ -557,6 +564,7 @@ struct LibraryTabView: View {
     @State private var artists: [BaseItemDto] = []
     @State private var songs: [BaseItemDto] = []
     @State private var isLoading = true
+    @State private var path = NavigationPath()
 
     private var showDownloadedOnly: Bool {
         appState.selectedServer?.showDownloadedOnly ?? false
@@ -590,38 +598,50 @@ struct LibraryTabView: View {
     }
 
     var body: some View {
-        Group {
-            if appState.selectedServer == nil {
-                ContentUnavailableView(
-                    "未选择服务器",
-                    systemImage: "server.rack",
-                    description: Text("请在设置中选择服务器")
-                )
-            } else if appState.selectedLibraryIds.isEmpty {
-                ContentUnavailableView(
-                    "未选择媒体库",
-                    systemImage: "square.stack",
-                    description: Text("请在设置中选择媒体库")
-                )
-            } else {
-                libraryContent
+        NavigationStack(path: $path) {
+            Group {
+                if appState.selectedServer == nil {
+                    ContentUnavailableView(
+                        "未选择服务器",
+                        systemImage: "server.rack",
+                        description: Text("请在设置中选择服务器")
+                    )
+                } else if appState.selectedLibraryIds.isEmpty {
+                    ContentUnavailableView(
+                        "未选择媒体库",
+                        systemImage: "square.stack",
+                        description: Text("请在设置中选择媒体库")
+                    )
+                } else {
+                    libraryContent
+                }
             }
-        }
-        .task {
-            await loadLibraryData()
-        }
-        .onChange(of: appState.selectedServer) {
-            Task {
+            .navigationTitle("资料库")
+            .navigationBarTitleDisplayMode(.large)
+            .navigationDestination(for: LibraryCategory.self) { category in
+                LibraryCategoryView(
+                    category: category,
+                    server: appState.selectedServer!,
+                    items: itemsForCategory(category),
+                    path: $path
+                )
+            }
+            .task {
                 await loadLibraryData()
             }
-        }
-        .onChange(of: appState.selectedLibraryIds) {
-            Task {
-                await loadLibraryData()
+            .onChange(of: appState.selectedServer) {
+                Task {
+                    await loadLibraryData()
+                }
             }
-        }
-        .onReceive(downloadManager.objectWillChange) {
-            // Refresh when downloads change
+            .onChange(of: appState.selectedLibraryIds) {
+                Task {
+                    await loadLibraryData()
+                }
+            }
+            .onReceive(downloadManager.objectWillChange) {
+                // Refresh when downloads change
+            }
         }
     }
 
@@ -685,15 +705,6 @@ struct LibraryTabView: View {
                 }
             }
             .padding(.bottom, 24)
-        }
-        .navigationTitle("资料库")
-        .navigationBarTitleDisplayMode(.large)
-        .navigationDestination(for: LibraryCategory.self) { category in
-            LibraryCategoryView(
-                category: category,
-                server: appState.selectedServer!,
-                items: itemsForCategory(category)
-            )
         }
     }
 
@@ -1116,11 +1127,12 @@ struct LibraryCategoryView: View {
     let category: LibraryCategory
     let server: ServerConfig
     let items: [BaseItemDto]
+    @Binding var path: NavigationPath
 
     var body: some View {
         Group {
             if category == .favorites {
-                FavoritesView(server: server)
+                FavoritesView(server: server, path: $path)
             } else if items.isEmpty {
                 ContentUnavailableView(
                     "没有\(category.rawValue)",
@@ -1145,11 +1157,11 @@ struct LibraryCategoryView: View {
                                 MediaRow(item: item, client: makeClient())
                             }
                         } else if item.type == "MusicAlbum" {
-                            NavigationLink(destination: AlbumTrackListView(server: server, albumId: item.id, title: item.name ?? "专辑")) {
+                            NavigationLink(destination: AlbumTrackListView(server: server, albumId: item.id, title: item.name ?? "专辑", path: $path)) {
                                 MediaRow(item: item, client: makeClient())
                             }
                         } else if item.type == "MusicArtist" {
-                            NavigationLink(destination: ArtistAlbumsView(server: server, artistId: item.id, artistName: item.name ?? "艺人")) {
+                            NavigationLink(destination: ArtistAlbumsView(server: server, artistId: item.id, artistName: item.name ?? "艺人", path: $path)) {
                                 MediaRow(item: item, client: makeClient())
                             }
                         } else {
@@ -1178,7 +1190,7 @@ struct LibraryCategoryView: View {
         ScrollView {
             VStack(spacing: 0) {
                 ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                    NavigationLink(destination: AlbumTrackListView(server: server, albumId: item.id, title: item.name ?? "专辑")) {
+                    NavigationLink(destination: AlbumTrackListView(server: server, albumId: item.id, title: item.name ?? "专辑", path: $path)) {
                         AlbumListRow(item: item, server: server)
                     }
                     .buttonStyle(.plain)
@@ -1197,7 +1209,7 @@ struct LibraryCategoryView: View {
         ScrollView {
             VStack(spacing: 0) {
                 ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                    NavigationLink(destination: ArtistAlbumsView(server: server, artistId: item.id, artistName: item.name ?? "艺人")) {
+                    NavigationLink(destination: ArtistAlbumsView(server: server, artistId: item.id, artistName: item.name ?? "艺人", path: $path)) {
                         ArtistListRow(item: item, server: server)
                     }
                     .buttonStyle(.plain)
@@ -1217,6 +1229,7 @@ struct ArtistAlbumsView: View {
     let server: ServerConfig
     let artistId: String
     let artistName: String
+    @Binding var path: NavigationPath
     @State private var albums: [BaseItemDto] = []
     @State private var isLoading = true
 
@@ -1240,7 +1253,7 @@ struct ArtistAlbumsView: View {
                 ScrollView {
                     VStack(spacing: 0) {
                         ForEach(Array(albums.enumerated()), id: \.element.id) { index, item in
-                            NavigationLink(destination: AlbumTrackListView(server: server, albumId: item.id, title: item.name ?? "专辑")) {
+                            NavigationLink(destination: AlbumTrackListView(server: server, albumId: item.id, title: item.name ?? "专辑", path: $path)) {
                                 AlbumListRow(item: item, server: server)
                             }
                             .buttonStyle(.plain)
@@ -1292,8 +1305,10 @@ struct SettingsTabView: View {
     @State private var editingServer: ServerConfig?
     @State private var speedTestServer: ServerConfig?
     @State private var showDirectPlayAlert = false
+    @State private var path = NavigationPath()
 
     var body: some View {
+        NavigationStack(path: $path) {
         List {
             Section(String(localized: "当前服务器")) {
                 if let selected = appState.selectedServer {
@@ -1467,7 +1482,7 @@ struct SettingsTabView: View {
                         }
                     ))
 
-                    NavigationLink(destination: DownloadsView()) {
+                    NavigationLink(value: "downloads") {
                         HStack {
                             Image(systemName: "arrow.down.circle")
                             Text("下载管理")
@@ -1526,6 +1541,12 @@ struct SettingsTabView: View {
             Button(String(localized: "知道了"), role: .cancel) { }
         } message: {
             Text(String(localized: "需要重新播放音乐才能生效"))
+        }
+        .navigationDestination(for: String.self) { value in
+            if value == "downloads" {
+                DownloadsView(path: $path)
+            }
+        }
         }
     }
 
@@ -1825,6 +1846,7 @@ struct SpeedTestSheet: View {
 
 struct FavoritesView: View {
     let server: ServerConfig
+    @Binding var path: NavigationPath
     @StateObject private var favorites = FavoritesManager.shared
                                                                                                                                                                                 @StateObject private var appState = AppState.shared
     @State private var trackItems: [FavoriteItem] = []
@@ -1852,7 +1874,8 @@ struct FavoritesView: View {
                                 title: "单曲",
                                 items: trackItems,
                                 client: client,
-                                server: server
+                                server: server,
+                                path: $path
                             )
                         }
                         if !albumItems.isEmpty {
@@ -1860,7 +1883,8 @@ struct FavoritesView: View {
                                 title: "专辑",
                                 items: albumItems,
                                 client: client,
-                                server: server
+                                server: server,
+                                path: $path
                             )
                         }
                     }
@@ -1902,6 +1926,7 @@ struct FavoriteSection: View {
     let items: [FavoriteItem]
     let client: JellyfinClient
     let server: ServerConfig
+    @Binding var path: NavigationPath
 
     private let columns = [
         GridItem(.flexible()),
@@ -1916,7 +1941,8 @@ struct FavoriteSection: View {
                     title: title,
                     items: items,
                     client: client,
-                    server: server
+                    server: server,
+                    path: $path
                 )
             } label: {
                 HStack(spacing: 4) {
@@ -1932,7 +1958,7 @@ struct FavoriteSection: View {
 
             LazyVGrid(columns: columns, spacing: 12) {
                 ForEach(items.prefix(6)) { item in
-                    FavoriteGridItem(item: item, client: client, server: server)
+                    FavoriteGridItem(item: item, client: client, server: server, path: $path)
                 }
             }
             .padding(.horizontal, 16)
@@ -1944,6 +1970,7 @@ struct FavoriteGridItem: View {
     let item: FavoriteItem
     let client: JellyfinClient
     let server: ServerConfig
+    @Binding var path: NavigationPath
     @StateObject private var favorites = FavoritesManager.shared
 
     private var isAlbum: Bool {
@@ -1972,7 +1999,7 @@ struct FavoriteGridItem: View {
 
         if isAlbum {
             NavigationLink {
-                AlbumTrackListView(server: server, albumId: item.itemId, title: item.name ?? "专辑")
+                AlbumTrackListView(server: server, albumId: item.itemId, title: item.name ?? "专辑", path: $path)
             } label: {
                 content
             }
@@ -2039,12 +2066,13 @@ struct FavoriteListView: View {
     let items: [FavoriteItem]
     let client: JellyfinClient
     let server: ServerConfig
+    @Binding var path: NavigationPath
 
     var body: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
                 ForEach(Array(items.enumerated()), id: \.element.itemId) { index, item in
-                    FavoriteRow(item: item, client: client, server: server)
+                    FavoriteRow(item: item, client: client, server: server, path: $path)
 
                     if index < items.count - 1 {
                         Divider()
@@ -2062,6 +2090,7 @@ struct FavoriteRow: View {
     let item: FavoriteItem
     let client: JellyfinClient
     let server: ServerConfig
+    @Binding var path: NavigationPath
     @StateObject private var favorites = FavoritesManager.shared
 
     private var isAlbum: Bool {
@@ -2102,7 +2131,7 @@ struct FavoriteRow: View {
 
         if isAlbum {
             NavigationLink {
-                AlbumTrackListView(server: server, albumId: item.itemId, title: item.name ?? "专辑")
+                AlbumTrackListView(server: server, albumId: item.itemId, title: item.name ?? "专辑", path: $path)
             } label: {
                 content
             }

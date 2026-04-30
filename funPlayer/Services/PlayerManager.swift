@@ -53,14 +53,11 @@ final class PlayerManager: ObservableObject {
     @Published var showPlaylist = false
     @Published var accentColor: Color = Color(UIColor.systemBlue)
     @Published var currentArtwork: UIImage?
-
-    var currentItem: BaseItemDto? {
-        guard queue.indices.contains(currentIndex) else { return nil }
-        return queue[currentIndex]
-    }
+    @Published var currentItem: BaseItemDto?
 
     private var player: AVPlayer?
     private var timeObserver: Any?
+    private var timeObserverPlayer: AVPlayer?
     private var cancellables = Set<AnyCancellable>()
     private var playbackEndCancellable: AnyCancellable?
     var currentServer: ServerConfig?
@@ -78,6 +75,7 @@ final class PlayerManager: ObservableObject {
         self.queue = queue
         self.currentServer = server
         self.currentIndex = index
+        self.currentItem = queue.indices.contains(index) ? queue[index] : nil
         self.shuffledIndices = Array(0..<queue.count)
         playCurrentItem()
     }
@@ -87,6 +85,7 @@ final class PlayerManager: ObservableObject {
         self.queue = [item]
         self.currentServer = server
         self.currentIndex = 0
+        self.currentItem = item
         self.shuffledIndices = [0]
         playCurrentItem()
     }
@@ -193,6 +192,7 @@ final class PlayerManager: ObservableObject {
             nextIndex = (currentIndex + 1) % queue.count
         }
         currentIndex = nextIndex
+        currentItem = queue.indices.contains(currentIndex) ? queue[currentIndex] : nil
         playCurrentItem()
     }
 
@@ -211,6 +211,7 @@ final class PlayerManager: ObservableObject {
             prevIndex = (currentIndex - 1 + queue.count) % queue.count
         }
         currentIndex = prevIndex
+        currentItem = queue.indices.contains(currentIndex) ? queue[currentIndex] : nil
         playCurrentItem()
     }
 
@@ -257,11 +258,22 @@ final class PlayerManager: ObservableObject {
 
     func stop() {
         reportPlaybackStopped()
+        removeTimeObserver()
+        playbackEndCancellable?.cancel()
+        playbackEndCancellable = nil
         player?.pause()
         player = nil
-        removeTimeObserver()
         cancellables.removeAll()
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+        currentItem = nil
+        currentServer = nil
+        currentArtwork = nil
+        queue = []
+        currentIndex = 0
+        isPlaying = false
+        isLoading = false
+        currentTime = 0
+        duration = 0
     }
 
     private func reportPlaybackStopped() {
@@ -361,6 +373,7 @@ final class PlayerManager: ObservableObject {
             }
             self.reportProgressIfNeeded()
         }
+        timeObserverPlayer = player
     }
 
     private func reportProgressIfNeeded() {
@@ -379,9 +392,10 @@ final class PlayerManager: ObservableObject {
     }
 
     private func removeTimeObserver() {
-        if let observer = timeObserver, let player = player {
+        if let observer = timeObserver, let player = timeObserverPlayer {
             player.removeTimeObserver(observer)
             timeObserver = nil
+            timeObserverPlayer = nil
         }
     }
 
