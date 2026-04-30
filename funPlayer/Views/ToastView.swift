@@ -48,7 +48,7 @@ struct ToastOverlay: View {
             if toast.isShowing, let message = toast.message {
                 Text(message)
                     .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(.black)
                     .padding(.horizontal, 20)
                     .padding(.vertical, 12)
                     .glassEffect(.clear, in: Capsule())
