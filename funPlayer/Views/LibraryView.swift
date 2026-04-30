@@ -864,7 +864,19 @@ struct AlbumTrackListView: View {
                             duration: item.runTimeTicks,
                             accentColor: accentColor,
                             item: item,
-                            server: server
+                            server: server,
+                            onDelete: {
+                                // 直接从列表中移除该项
+                                items.removeAll { $0.id == item.id }
+                                // 如果列表为空，返回上一页
+                                if items.isEmpty {
+                                    if !path.isEmpty {
+                                        path.removeLast()
+                                    } else {
+                                        presentationMode.wrappedValue.dismiss()
+                                    }
+                                }
+                            }
                         )
                     }
                     .buttonStyle(.plain)
@@ -1042,6 +1054,7 @@ struct TrackRow: View {
     let accentColor: Color
     var item: BaseItemDto?
     var server: ServerConfig?
+    var onDelete: (() -> Void)?
     @ObservedObject private var downloadManager = DownloadManager.shared
     @ObservedObject private var favorites = FavoritesManager.shared
 
@@ -1092,6 +1105,8 @@ struct TrackRow: View {
                     downloadManager.deleteAlbumIfEmpty(albumId: albumId, serverId: serverId)
                 }
                 ToastManager.shared.show("已删除下载")
+                // 通知父视图刷新
+                onDelete?()
             })
         } else {
             items.append(CustomMenuItem(
