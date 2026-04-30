@@ -568,6 +568,34 @@ class DownloadManager: ObservableObject {
         downloadStatusVersion = UUID()
     }
 
+    func deleteAlbumIfEmpty(albumId: String, serverId: String) {
+        guard let context = modelContext else { return }
+        // 检查该专辑下是否还有其他已下载的歌曲（Audio 类型且状态为 completed）
+        let descriptor = FetchDescriptor<DownloadItem>(
+            predicate: #Predicate { $0.albumId == albumId && $0.serverId == serverId && $0.itemType == "Audio" && $0.downloadStatus == .completed }
+        )
+        let remainingTracks = (try? context.fetch(descriptor)) ?? []
+        if remainingTracks.isEmpty {
+            // 没有剩余歌曲，删除专辑记录
+            let albumDescriptor = FetchDescriptor<DownloadItem>(
+                predicate: #Predicate { $0.itemId == albumId && $0.serverId == serverId }
+            )
+            if let albumItems = try? context.fetch(albumDescriptor) {
+                for albumItem in albumItems {
+                    if let path = albumItem.localFilePath {
+                        try? fileManager.removeItem(atPath: path)
+                    }
+                    if let artworkPath = albumItem.artworkFilePath {
+                        try? fileManager.removeItem(atPath: artworkPath)
+                    }
+                    context.delete(albumItem)
+                }
+                try? context.save()
+                downloadStatusVersion = UUID()
+            }
+        }
+    }
+
     func deleteAllDownloads(forServerId serverId: String) {
         let items = getDownloadedItems(forServerId: serverId)
         for item in items {

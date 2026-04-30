@@ -1078,7 +1078,19 @@ struct TrackRow: View {
                 systemImage: "trash.fill",
                 isDestructive: true
             ) {
-                downloadManager.deleteDownload(itemId: item.id, serverId: server.id.uuidString)
+                // 如果正在播放该歌曲，停止播放
+                if let currentItem = PlayerManager.shared.currentItem,
+                   currentItem.id == item.id {
+                    PlayerManager.shared.stop()
+                }
+                // 获取专辑ID，用于后续检查
+                let albumId = item.albumId
+                let serverId = server.id.uuidString
+                downloadManager.deleteDownload(itemId: item.id, serverId: serverId)
+                // 检查专辑是否还有其他下载的歌曲，如果没有则删除专辑记录
+                if let albumId = albumId {
+                    downloadManager.deleteAlbumIfEmpty(albumId: albumId, serverId: serverId)
+                }
                 ToastManager.shared.show("已删除下载")
             })
         } else {
