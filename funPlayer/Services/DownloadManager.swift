@@ -188,6 +188,8 @@ class DownloadManager: ObservableObject {
                 }
                 try? self?.modelContext?.save()
                 self?.activeDownloads.removeValue(forKey: itemId)
+                self?.downloadStatusVersion = UUID()
+                print("[DownloadManager] Download completed for \(itemId), status updated, new version: \(self?.downloadStatusVersion.uuidString ?? "")")
             }
         }
 

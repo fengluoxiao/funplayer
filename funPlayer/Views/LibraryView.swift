@@ -647,11 +647,14 @@ struct AlbumTrackListView: View {
             }
             ToolbarItem(placement: .topBarTrailing) {
                 if let item = albumItem {
+                    let showDownloadedOnly = appState.selectedServer?.showDownloadedOnly ?? false
                     AlbumDownloadButton(item: item, server: server, onDelete: {
-                        if !path.isEmpty {
-                            path.removeLast()
-                        } else {
-                            presentationMode.wrappedValue.dismiss()
+                        if showDownloadedOnly {
+                            if !path.isEmpty {
+                                path.removeLast()
+                            } else {
+                                presentationMode.wrappedValue.dismiss()
+                            }
                         }
                     })
                 }
@@ -866,14 +869,17 @@ struct AlbumTrackListView: View {
                             item: item,
                             server: server,
                             onDelete: {
-                                // 直接从列表中移除该项
-                                items.removeAll { $0.id == item.id }
-                                // 如果列表为空，返回上一页
-                                if items.isEmpty {
-                                    if !path.isEmpty {
-                                        path.removeLast()
-                                    } else {
-                                        presentationMode.wrappedValue.dismiss()
+                                let showDownloadedOnly = appState.selectedServer?.showDownloadedOnly ?? false
+                                if showDownloadedOnly {
+                                    // 直接从列表中移除该项
+                                    items.removeAll { $0.id == item.id }
+                                    // 如果列表为空，返回上一页
+                                    if items.isEmpty {
+                                        if !path.isEmpty {
+                                            path.removeLast()
+                                        } else {
+                                            presentationMode.wrappedValue.dismiss()
+                                        }
                                     }
                                 }
                             }
@@ -1058,11 +1064,12 @@ struct TrackRow: View {
     @ObservedObject private var downloadManager = DownloadManager.shared
     @ObservedObject private var favorites = FavoritesManager.shared
 
-    private var menuItems: [CustomMenuItem] {
+    private func buildMenuItems() -> [CustomMenuItem] {
         guard let item = item, let server = server else { return [] }
         let isDownloaded = downloadManager.isDownloaded(itemId: item.id, serverId: server.id.uuidString)
         let isDownloading = downloadManager.isDownloading(itemId: item.id)
         let isFav = favorites.isFavorite(itemId: item.id)
+        print("[TrackRow] buildMenuItems for \(item.name ?? "unknown") - isDownloaded: \(isDownloaded), isDownloading: \(isDownloading), version: \(downloadManager.downloadStatusVersion.uuidString)")
 
         var items: [CustomMenuItem] = []
 
@@ -1169,8 +1176,11 @@ struct TrackRow: View {
 
             Spacer()
 
-            MenuButton(menuItems: menuItems)
-                .frame(width: 32, height: 32)
+            MenuButton(
+                menuItems: buildMenuItems(),
+                refreshId: "\(item?.id ?? "")_\(downloadManager.downloadStatusVersion.uuidString)"
+            )
+            .frame(width: 32, height: 32)
 
             if let ticks = duration {
                 Text(formatTicks(ticks))

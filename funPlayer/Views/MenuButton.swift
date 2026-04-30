@@ -8,6 +8,7 @@ import UIKit
 
 struct MenuButton: UIViewRepresentable {
     let menuItems: [CustomMenuItem]
+    let refreshId: String
 
     func makeUIView(context: Context) -> UIButton {
         let button = UIButton(type: .system)
