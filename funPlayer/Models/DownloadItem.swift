@@ -32,6 +32,7 @@ final class DownloadItem {
     var downloadDate: Date
     var fileSize: Int64?
     var errorMessage: String?
+    var albumTracksJson: String?
 
     init(
         itemId: String,
@@ -58,6 +59,7 @@ final class DownloadItem {
         self.downloadDate = Date()
         self.fileSize = nil
         self.errorMessage = nil
+        self.albumTracksJson = nil
     }
 
     var downloadStatus: DownloadStatus {

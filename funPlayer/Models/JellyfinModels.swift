@@ -89,6 +89,14 @@ struct UserData: Codable {
         case playCount = "PlayCount"
         case playedPercentage = "PlayedPercentage"
     }
+
+    init(playbackPositionTicks: Int64? = nil, isFavorite: Bool? = nil, played: Bool? = nil, playCount: Int? = nil, playedPercentage: Double? = nil) {
+        self.playbackPositionTicks = playbackPositionTicks
+        self.isFavorite = isFavorite
+        self.played = played
+        self.playCount = playCount
+        self.playedPercentage = playedPercentage
+    }
 }
 
 struct BaseItemDtoQueryResult: Codable {

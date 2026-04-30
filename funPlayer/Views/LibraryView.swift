@@ -629,15 +629,16 @@ struct AlbumTrackListView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 if let item = albumItem {
                     let isFav = favorites.isFavorite(itemId: item.id)
-                    let isLocalAlbum = DownloadManager.shared.isDownloaded(itemId: item.id, serverId: server.id.uuidString)
+                    let showDownloadedOnly = appState.selectedServer?.showDownloadedOnly ?? false
                     Button {
                         favorites.toggleFavorite(item: item, server: server, libraryIds: appState.selectedLibraryIds, type: .album)
                     } label: {
                         Image(systemName: isFav ? "heart.fill" : "heart")
                             .font(.system(size: 20, weight: .semibold))
-                            .foregroundStyle(isFav ? .red : (isLocalAlbum ? .primary.opacity(0.3) : .primary))
+                            .foregroundStyle(isFav ? .red : .primary)
+                            .opacity(showDownloadedOnly ? 0.3 : 1.0)
                     }
-                    .disabled(isLocalAlbum)
+                    .disabled(showDownloadedOnly)
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
@@ -661,8 +662,89 @@ struct AlbumTrackListView: View {
             await loadAccentColor()
         } catch {
             print("[AlbumTrackListView] Error loading items: \(error)")
+            // 离线时从本地加载已下载的曲目
+            await loadLocalAlbumTracks()
+            // 离线时从本地封面取色
+            await loadLocalAccentColor()
         }
         isLoading = false
+    }
+
+    private func loadLocalAlbumTracks() async {
+        let serverId = server.id.uuidString
+        let downloadedItems = DownloadManager.shared.getDownloadedItems(forServerId: serverId)
+        let albumTracks = downloadedItems.filter { $0.albumId == albumId && $0.type == "Audio" }
+        
+        guard !albumTracks.isEmpty else { return }
+        
+        var tracks: [BaseItemDto] = []
+        
+        // 优先使用专辑下载时保存的完整曲目列表信息
+        if let albumDownloadItem = DownloadManager.shared.getAlbumDownloadItem(albumId: albumId, serverId: serverId),
+           let tracksJson = albumDownloadItem.albumTracksJson,
+           let tracksData = tracksJson.data(using: .utf8),
+           let savedTracks = try? JSONDecoder().decode([BaseItemDto].self, from: tracksData) {
+            // 使用保存的完整曲目信息，但只保留已下载的曲目
+            let downloadedItemIds = Set(albumTracks.map { $0.itemId })
+            for track in savedTracks {
+                if downloadedItemIds.contains(track.id) {
+                    tracks.append(track)
+                }
+            }
+        }
+        
+        // 如果没有保存的曲目列表信息，或者解析失败，则使用下载记录中的基本信息
+        if tracks.isEmpty {
+            for download in albumTracks.sorted(by: { $0.name < $1.name }) {
+                let dto = BaseItemDto(
+                    id: download.itemId,
+                    name: download.name,
+                    type: download.type,
+                    overview: nil,
+                    indexNumber: nil,
+                    parentIndexNumber: nil,
+                    seriesName: nil,
+                    album: download.name,
+                    albumId: download.albumId,
+                    albumArtist: download.artist,
+                    artists: download.artist != nil ? [download.artist!] : nil,
+                    runTimeTicks: nil,
+                    userData: UserData(isFavorite: download.isFavorite),
+                    primaryImageAspectRatio: nil,
+                    imageTags: nil,
+                    backdropImageTags: nil,
+                    mediaType: nil,
+                    collectionType: nil
+                )
+                tracks.append(dto)
+            }
+        }
+        
+        await MainActor.run {
+            self.items = tracks
+            if self.albumItem == nil, let first = albumTracks.first {
+                self.albumItem = BaseItemDto(
+                    id: albumId,
+                    name: first.name,
+                    type: "MusicAlbum",
+                    overview: nil,
+                    indexNumber: nil,
+                    parentIndexNumber: nil,
+                    seriesName: nil,
+                    album: first.name,
+                    albumId: albumId,
+                    albumArtist: first.artist,
+                    artists: first.artist != nil ? [first.artist!] : nil,
+                    runTimeTicks: nil,
+                    userData: nil,
+                    primaryImageAspectRatio: nil,
+                    imageTags: nil,
+                    backdropImageTags: nil,
+                    mediaType: nil,
+                    collectionType: nil
+                )
+            }
+        }
     }
 
     @ViewBuilder
@@ -809,6 +891,18 @@ struct AlbumTrackListView: View {
     }
 
     private func loadAccentColor() async {
+        // 优先尝试本地封面
+        if let localArtworkURL = DownloadManager.shared.getLocalArtworkURL(itemId: albumId),
+           let data = try? Data(contentsOf: localArtworkURL),
+           let image = UIImage(data: data),
+           let color = extractDominantColor(from: image) {
+            await MainActor.run {
+                self.accentColor = color
+            }
+            return
+        }
+
+        // 本地没有，尝试网络封面
         guard let url = albumArtworkURL() else { return }
         do {
             let (data, _) = try await URLSession.shared.data(from: url)
@@ -819,6 +913,17 @@ struct AlbumTrackListView: View {
             }
         } catch {
             print("[AlbumTrackListView] Failed to extract color: \(error)")
+        }
+    }
+
+    private func loadLocalAccentColor() async {
+        if let localArtworkURL = DownloadManager.shared.getLocalArtworkURL(itemId: albumId),
+           let data = try? Data(contentsOf: localArtworkURL),
+           let image = UIImage(data: data),
+           let color = extractDominantColor(from: image) {
+            await MainActor.run {
+                self.accentColor = color
+            }
         }
     }
 

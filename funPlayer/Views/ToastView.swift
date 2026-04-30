@@ -34,6 +34,13 @@ final class ToastManager: ObservableObject {
 
 struct ToastOverlay: View {
     @StateObject private var toast = ToastManager.shared
+    @StateObject private var player = PlayerManager.shared
+
+    private var bottomPadding: CGFloat {
+        let basePadding: CGFloat = 100
+        let miniPlayerHeight: CGFloat = 64
+        return player.currentItem != nil ? basePadding + miniPlayerHeight : basePadding
+    }
 
     var body: some View {
         VStack {
@@ -44,10 +51,9 @@ struct ToastOverlay: View {
                     .foregroundStyle(.primary)
                     .padding(.horizontal, 20)
                     .padding(.vertical, 12)
-                    .background(.ultraThinMaterial, in: .capsule)
-                    .environment(\.colorScheme, .light)
+                    .glassEffect(.regular, in: Capsule())
                     .transition(.move(edge: .bottom).combined(with: .opacity))
-                    .padding(.bottom, 100)
+                    .padding(.bottom, bottomPadding)
             }
         }
         .animation(.easeInOut(duration: 0.3), value: toast.isShowing)

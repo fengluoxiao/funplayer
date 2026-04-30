@@ -299,4 +299,34 @@ class JellyfinClient: ObservableObject {
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { throw JellyfinError.invalidResponse }
         return try JSONDecoder().decode(UserData.self, from: data)
     }
+
+    // MARK: - Lyrics
+
+    func getLyrics(itemId: String) async throws -> String {
+        guard let base = baseURL else { throw JellyfinError.invalidURL }
+        let url = base.appendingPathComponent("/Items/\(itemId)/Lyrics")
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let token = serverConfig?.accessToken {
+            req.setValue("MediaBrowser Token=\"\(token)\", Client=\"funPlayer\", Device=\"iOS\", DeviceId=\"\(deviceId)\", Version=\"1.0\"", forHTTPHeaderField: "Authorization")
+        }
+
+        let (data, response) = try await session.data(for: req)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { throw JellyfinError.invalidResponse }
+
+        // Jellyfin lyrics API returns JSON with LyricLines array or plain text
+        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let lines = json["LyricLines"] as? [[String: Any]] {
+            let lyrics = lines.compactMap { $0["Text"] as? String }.joined(separator: "\n")
+            return lyrics
+        }
+
+        // Fallback to plain text
+        if let text = String(data: data, encoding: .utf8) {
+            return text
+        }
+
+        throw JellyfinError.noData
+    }
 }

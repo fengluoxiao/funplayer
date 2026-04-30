@@ -127,7 +127,7 @@ struct FullScreenPlayer: View {
     @ViewBuilder
     private func favoriteButton() -> some View {
         let isFav = favorites.isFavorite(itemId: player.currentItem?.id ?? "")
-        let isLocalFile = isPlayingLocalFile()
+        let showDownloadedOnly = AppState.shared.selectedServer?.showDownloadedOnly ?? false
         Button {
             guard let item = player.currentItem, let server = player.currentServer else { return }
             let appState = AppState.shared
@@ -137,10 +137,11 @@ struct FullScreenPlayer: View {
         } label: {
             Image(systemName: isFav ? "heart.fill" : "heart")
                 .font(.system(size: 24))
-                .foregroundStyle(isFav ? .red : (isLocalFile ? accentColor.opacity(0.3) : accentColor))
+                .foregroundStyle(isFav ? .red : accentColor)
+                .opacity(showDownloadedOnly ? 0.3 : 1.0)
                 .frame(maxWidth: .infinity)
         }
-        .disabled(isLocalFile)
+        .disabled(showDownloadedOnly)
     }
 
     private func isPlayingLocalFile() -> Bool {

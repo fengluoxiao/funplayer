@@ -130,6 +130,7 @@ struct DownloadRow: View {
                 Image(systemName: "xmark.circle.fill")
                     .foregroundStyle(.red)
             }
+            .buttonStyle(.borderless)
         }
     }
 }
@@ -166,6 +167,7 @@ struct DownloadedRow: View {
                 Image(systemName: "trash")
                     .foregroundStyle(.red)
             }
+            .buttonStyle(.borderless)
         }
     }
 

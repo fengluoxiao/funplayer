@@ -75,6 +75,14 @@ class DownloadManager: ObservableObject {
         return try? context.fetch(descriptor).first
     }
 
+    func getAlbumDownloadItem(albumId: String, serverId: String) -> DownloadItem? {
+        guard let context = modelContext else { return nil }
+        let descriptor = FetchDescriptor<DownloadItem>(
+            predicate: #Predicate { $0.itemId == albumId && $0.serverId == serverId && $0.type == "MusicAlbum" }
+        )
+        return try? context.fetch(descriptor).first
+    }
+
     func isDownloaded(itemId: String, serverId: String) -> Bool {
         getDownloadItem(itemId: itemId, serverId: serverId)?.isDownloaded ?? false
     }
@@ -187,8 +195,16 @@ class DownloadManager: ObservableObject {
         try? modelContext?.save()
         task.start()
 
-        // 同时下载封面图片
+        // 同时下载封面图片（单曲封面）
         downloadArtwork(itemId: itemId, server: server, downloadItem: downloadItem)
+
+        // 如果单曲属于某个专辑，同时下载专辑封面
+        if let albumId = item.albumId {
+            downloadAlbumArtworkIfNeeded(albumId: albumId, server: server)
+        }
+
+        // 同时下载歌词
+        downloadLyrics(itemId: itemId, server: server, downloadItem: downloadItem)
 
         ToastManager.shared.show("开始下载 \"\(downloadItem.name)\"")
     }
@@ -245,6 +261,15 @@ class DownloadManager: ObservableObject {
                         self.activeDownloads.removeValue(forKey: albumId)
                     }
                     return
+                }
+
+                // 保存专辑曲目列表信息到本地，供离线时使用
+                if let tracksData = try? JSONEncoder().encode(tracks),
+                   let tracksJson = String(data: tracksData, encoding: .utf8) {
+                    await MainActor.run {
+                        albumDownloadItem.albumTracksJson = tracksJson
+                        try? self.modelContext?.save()
+                    }
                 }
 
                 var completedCount = 0
@@ -379,6 +404,12 @@ class DownloadManager: ObservableObject {
             try? modelContext?.save()
             self.downloadStatusVersion = UUID()
         }
+
+        // 下载单曲封面
+        await downloadArtworkAsync(itemId: itemId, server: server, downloadItem: downloadItem)
+
+        // 下载歌词
+        await downloadLyricsAsync(itemId: itemId, server: server, downloadItem: downloadItem)
     }
 
     private func downloadArtwork(itemId: String, server: ServerConfig, downloadItem: DownloadItem) {
@@ -400,6 +431,80 @@ class DownloadManager: ObservableObject {
         }
     }
 
+    private func downloadAlbumArtworkIfNeeded(albumId: String, server: ServerConfig) {
+        let artworkURL = artworkFileURL(for: albumId)
+        if fileManager.fileExists(atPath: artworkURL.path) { return }
+
+        let client = JellyfinClient()
+        client.serverConfig = server
+        guard let imageURL = client.imageURL(itemId: albumId, maxWidth: 600) else { return }
+
+        Task {
+            do {
+                let (data, _) = try await URLSession.shared.data(from: imageURL)
+                try data.write(to: artworkURL)
+                print("[DownloadManager] Album artwork downloaded: \(artworkURL.path)")
+            } catch {
+                print("[DownloadManager] Album artwork download failed: \(error)")
+            }
+        }
+    }
+
+    private func downloadLyrics(itemId: String, server: ServerConfig, downloadItem: DownloadItem) {
+        Task {
+            let client = JellyfinClient()
+            client.serverConfig = server
+            do {
+                let lyrics = try await client.getLyrics(itemId: itemId)
+                if !lyrics.isEmpty {
+                    downloadItem.lyrics = lyrics
+                    try? modelContext?.save()
+                    print("[DownloadManager] Lyrics downloaded for \(itemId)")
+                }
+            } catch {
+                print("[DownloadManager] Lyrics download failed: \(error)")
+            }
+        }
+    }
+
+    private func downloadArtworkAsync(itemId: String, server: ServerConfig, downloadItem: DownloadItem) async {
+        let client = JellyfinClient()
+        client.serverConfig = server
+        guard let imageURL = client.imageURL(itemId: itemId, maxWidth: 600) else { return }
+
+        let artworkURL = artworkFileURL(for: itemId)
+        if fileManager.fileExists(atPath: artworkURL.path) { return }
+
+        do {
+            let (data, _) = try await URLSession.shared.data(from: imageURL)
+            try data.write(to: artworkURL)
+            await MainActor.run {
+                downloadItem.artworkFilePath = artworkURL.path
+                try? self.modelContext?.save()
+            }
+            print("[DownloadManager] Artwork downloaded for \(itemId)")
+        } catch {
+            print("[DownloadManager] Artwork download failed for \(itemId): \(error)")
+        }
+    }
+
+    private func downloadLyricsAsync(itemId: String, server: ServerConfig, downloadItem: DownloadItem) async {
+        let client = JellyfinClient()
+        client.serverConfig = server
+        do {
+            let lyrics = try await client.getLyrics(itemId: itemId)
+            if !lyrics.isEmpty {
+                await MainActor.run {
+                    downloadItem.lyrics = lyrics
+                    try? self.modelContext?.save()
+                }
+                print("[DownloadManager] Lyrics downloaded for \(itemId)")
+            }
+        } catch {
+            print("[DownloadManager] Lyrics download failed for \(itemId): \(error)")
+        }
+    }
+
     private func artworkFileURL(for itemId: String) -> URL {
         artworkDirectory.appendingPathComponent("\(itemId).jpg")
     }
@@ -410,8 +515,16 @@ class DownloadManager: ObservableObject {
     }
 
     func cancelDownload(itemId: String) {
+        // 先尝试直接取消
         activeDownloads[itemId]?.cancel()
         activeDownloads.removeValue(forKey: itemId)
+
+        // 如果是单曲，尝试通过 albumId 取消专辑的 dummyTask
+        if let item = getAllDownloads().first(where: { $0.itemId == itemId }),
+           let albumId = item.albumId {
+            activeDownloads[albumId]?.cancel()
+            activeDownloads.removeValue(forKey: albumId)
+        }
 
         if let item = getAllDownloads().first(where: { $0.itemId == itemId }) {
             item.downloadStatus = .cancelled

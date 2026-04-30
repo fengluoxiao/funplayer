@@ -379,8 +379,8 @@ struct HomeTabView: View {
                     indexNumber: nil,
                     parentIndexNumber: nil,
                     seriesName: nil,
-                    album: nil,
-                    albumId: nil,
+                    album: download.type == "MusicAlbum" ? download.name : nil,
+                    albumId: download.albumId,
                     albumArtist: download.artist,
                     artists: download.artist != nil ? [download.artist!] : nil,
                     runTimeTicks: nil,
@@ -730,6 +730,8 @@ struct LibraryTabView: View {
             let downloadedItems = downloadManager.getDownloadedItems(forServerId: server.id.uuidString)
             var allAlbums: [BaseItemDto] = []
             var allSongs: [BaseItemDto] = []
+            var albumMap: [String: BaseItemDto] = [:]
+
             for download in downloadedItems {
                 let dto = BaseItemDto(
                     id: download.itemId,
@@ -739,8 +741,8 @@ struct LibraryTabView: View {
                     indexNumber: nil,
                     parentIndexNumber: nil,
                     seriesName: nil,
-                    album: nil,
-                    albumId: nil,
+                    album: download.type == "MusicAlbum" ? download.name : nil,
+                    albumId: download.albumId,
                     albumArtist: download.artist,
                     artists: download.artist != nil ? [download.artist!] : nil,
                     runTimeTicks: nil,
@@ -752,11 +754,62 @@ struct LibraryTabView: View {
                     collectionType: nil
                 )
                 if download.type == "MusicAlbum" {
-                    allAlbums.append(dto)
-                } else {
+                    albumMap[download.itemId] = dto
+                } else if download.type == "Audio" {
                     allSongs.append(dto)
+                    // 从单曲中收集专辑信息
+                    if let albumId = download.albumId, !albumId.isEmpty, albumMap[albumId] == nil {
+                        // 尝试查找专辑下载记录获取更完整的信息
+                        if let albumDownload = downloadManager.getAlbumDownloadItem(albumId: albumId, serverId: server.id.uuidString) {
+                            albumMap[albumId] = BaseItemDto(
+                                id: albumId,
+                                name: albumDownload.name,
+                                type: "MusicAlbum",
+                                overview: nil,
+                                indexNumber: nil,
+                                parentIndexNumber: nil,
+                                seriesName: nil,
+                                album: albumDownload.name,
+                                albumId: albumId,
+                                albumArtist: albumDownload.artist,
+                                artists: albumDownload.artist != nil ? [albumDownload.artist!] : nil,
+                                runTimeTicks: nil,
+                                userData: nil,
+                                primaryImageAspectRatio: nil,
+                                imageTags: nil,
+                                backdropImageTags: nil,
+                                mediaType: nil,
+                                collectionType: nil
+                            )
+                        } else {
+                            // 没有专辑下载记录，用单曲信息创建专辑信息
+                            albumMap[albumId] = BaseItemDto(
+                                id: albumId,
+                                name: download.name,
+                                type: "MusicAlbum",
+                                overview: nil,
+                                indexNumber: nil,
+                                parentIndexNumber: nil,
+                                seriesName: nil,
+                                album: download.name,
+                                albumId: albumId,
+                                albumArtist: download.artist,
+                                artists: download.artist != nil ? [download.artist!] : nil,
+                                runTimeTicks: nil,
+                                userData: nil,
+                                primaryImageAspectRatio: nil,
+                                imageTags: nil,
+                                backdropImageTags: nil,
+                                mediaType: nil,
+                                collectionType: nil
+                            )
+                        }
+                    }
                 }
             }
+
+            allAlbums = Array(albumMap.values).sorted { ($0.name ?? "") < ($1.name ?? "") }
+
             // 从下载记录中提取艺人（根据专辑艺术家或单曲艺术家）
             var artistMap: [String: BaseItemDto] = [:]
             for download in downloadedItems {
