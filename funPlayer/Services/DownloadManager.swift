@@ -570,25 +570,28 @@ class DownloadManager: ObservableObject {
 
     func deleteAlbumIfEmpty(albumId: String, serverId: String) {
         guard let context = modelContext else { return }
-        // 检查该专辑下是否还有其他已下载的歌曲（Audio 类型且状态为 completed）
+        // 检查该专辑下是否还有其他已下载的歌曲
+        // 先获取该专辑下的所有项目
         let descriptor = FetchDescriptor<DownloadItem>(
-            predicate: #Predicate { $0.albumId == albumId && $0.serverId == serverId && $0.itemType == "Audio" && $0.downloadStatus == .completed }
+            predicate: #Predicate { $0.albumId == albumId && $0.serverId == serverId }
         )
-        let remainingTracks = (try? context.fetch(descriptor)) ?? []
+        let albumItems = (try? context.fetch(descriptor)) ?? []
+        // 过滤出 Audio 类型且已完成的歌曲
+        let remainingTracks = albumItems.filter { $0.type == "Audio" && $0.downloadStatus == .completed }
         if remainingTracks.isEmpty {
-            // 没有剩余歌曲，删除专辑记录
-            let albumDescriptor = FetchDescriptor<DownloadItem>(
+            // 没有剩余歌曲，删除专辑记录（包括专辑本身和歌词等）
+            let albumRecordDescriptor = FetchDescriptor<DownloadItem>(
                 predicate: #Predicate { $0.itemId == albumId && $0.serverId == serverId }
             )
-            if let albumItems = try? context.fetch(albumDescriptor) {
-                for albumItem in albumItems {
-                    if let path = albumItem.localFilePath {
+            if let records = try? context.fetch(albumRecordDescriptor) {
+                for record in records {
+                    if let path = record.localFilePath {
                         try? fileManager.removeItem(atPath: path)
                     }
-                    if let artworkPath = albumItem.artworkFilePath {
+                    if let artworkPath = record.artworkFilePath {
                         try? fileManager.removeItem(atPath: artworkPath)
                     }
-                    context.delete(albumItem)
+                    context.delete(record)
                 }
                 try? context.save()
                 downloadStatusVersion = UUID()
