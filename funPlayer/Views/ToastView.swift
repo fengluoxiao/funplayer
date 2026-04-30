@@ -51,7 +51,7 @@ struct ToastOverlay: View {
                     .foregroundStyle(.primary)
                     .padding(.horizontal, 20)
                     .padding(.vertical, 12)
-                    .glassEffect(.regular, in: Capsule())
+                    .glassEffect(.clear, in: Capsule())
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                     .padding(.bottom, bottomPadding)
             }

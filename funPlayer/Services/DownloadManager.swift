@@ -72,7 +72,10 @@ class DownloadManager: ObservableObject {
         let descriptor = FetchDescriptor<DownloadItem>(
             predicate: #Predicate { $0.itemId == itemId && $0.serverId == serverId }
         )
-        return try? context.fetch(descriptor).first
+        let items = (try? context.fetch(descriptor)) ?? []
+        // 优先返回 completed 或 downloading 状态的记录
+        return items.first { $0.downloadStatus == .completed || $0.downloadStatus == .downloading }
+            ?? items.first
     }
 
     func getAlbumDownloadItem(albumId: String, serverId: String) -> DownloadItem? {
@@ -174,6 +177,10 @@ class DownloadManager: ObservableObject {
                         downloadItem.localFilePath = url.path
                         downloadItem.progress = 1.0
                         ToastManager.shared.show("\"\(downloadItem.name)\" 下载完成")
+                        // 检查专辑是否所有歌曲都已下载
+                        if let albumId = item.albumId {
+                            self?.checkAndMarkAlbumDownloaded(albumId: albumId, serverId: serverId)
+                        }
                     } else {
                         downloadItem.downloadStatus = .failed
                         downloadItem.errorMessage = "文件保存失败"
@@ -598,6 +605,51 @@ class DownloadManager: ObservableObject {
                 try? context.save()
                 downloadStatusVersion = UUID()
             }
+        }
+    }
+
+    func checkAndMarkAlbumDownloaded(albumId: String, serverId: String) {
+        guard let context = modelContext else { return }
+        // 获取专辑信息
+        let albumDescriptor = FetchDescriptor<DownloadItem>(
+            predicate: #Predicate { $0.itemId == albumId && $0.serverId == serverId && $0.type == "MusicAlbum" }
+        )
+        let albumItems = (try? context.fetch(albumDescriptor)) ?? []
+        // 如果专辑已经标记为下载完成，不需要再处理
+        if let albumItem = albumItems.first, albumItem.downloadStatus == .completed {
+            return
+        }
+        // 获取专辑下的所有歌曲
+        let tracksDescriptor = FetchDescriptor<DownloadItem>(
+            predicate: #Predicate { $0.albumId == albumId && $0.serverId == serverId && $0.type == "Audio" }
+        )
+        let tracks = (try? context.fetch(tracksDescriptor)) ?? []
+        // 检查是否所有歌曲都已下载完成
+        let allDownloaded = !tracks.isEmpty && tracks.allSatisfy { $0.downloadStatus == .completed }
+        if allDownloaded {
+            if let albumItem = albumItems.first {
+                // 更新现有专辑记录
+                albumItem.downloadStatus = .completed
+                albumItem.progress = 1.0
+            } else {
+                // 创建新的专辑记录
+                let newAlbumItem = DownloadItem(
+                    itemId: albumId,
+                    serverId: serverId,
+                    name: "专辑",
+                    artist: nil,
+                    type: "MusicAlbum",
+                    albumId: nil,
+                    isFavorite: false,
+                    indexNumber: nil
+                )
+                newAlbumItem.downloadStatus = .completed
+                newAlbumItem.progress = 1.0
+                context.insert(newAlbumItem)
+            }
+            try? context.save()
+            downloadStatusVersion = UUID()
+            ToastManager.shared.show("专辑下载完成")
         }
     }
 
