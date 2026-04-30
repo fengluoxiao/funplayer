@@ -126,7 +126,8 @@ class DownloadManager: ObservableObject {
             type: item.type,
             albumId: item.albumId,
             isFavorite: isFavorite,
-            indexNumber: item.indexNumber
+            indexNumber: item.indexNumber,
+            albumName: item.album
         )
 
         modelContext?.insert(downloadItem)
@@ -350,7 +351,8 @@ class DownloadManager: ObservableObject {
             type: item.type,
             albumId: albumId,
             isFavorite: isFavorite,
-            indexNumber: item.indexNumber
+            indexNumber: item.indexNumber,
+            albumName: item.album
         )
 
         await MainActor.run {
@@ -627,17 +629,27 @@ class DownloadManager: ObservableObject {
         // 检查是否所有歌曲都已下载完成
         let allDownloaded = !tracks.isEmpty && tracks.allSatisfy { $0.downloadStatus == .completed }
         if allDownloaded {
+            // 从已下载的单曲中推断专辑名称和艺术家
+            let albumName = tracks.first?.albumName ?? tracks.first?.name ?? "专辑"
+            let albumArtist = tracks.first?.artist
             if let albumItem = albumItems.first {
                 // 更新现有专辑记录
                 albumItem.downloadStatus = .completed
                 albumItem.progress = 1.0
+                // 如果之前名称是占位符，更新为真实名称
+                if albumItem.name == "专辑" || albumItem.name == "Unknown Album" {
+                    albumItem.name = albumName
+                }
+                if albumItem.artist == nil {
+                    albumItem.artist = albumArtist
+                }
             } else {
-                // 创建新的专辑记录
+                // 创建新的专辑记录，使用推断出的真实名称
                 let newAlbumItem = DownloadItem(
                     itemId: albumId,
                     serverId: serverId,
-                    name: "专辑",
-                    artist: nil,
+                    name: albumName,
+                    artist: albumArtist,
                     type: "MusicAlbum",
                     albumId: nil,
                     isFavorite: false,
