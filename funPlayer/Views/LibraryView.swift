@@ -665,6 +665,13 @@ struct AlbumTrackListView: View {
             client.serverConfig = server
             await loadAlbumTracks()
         }
+        .onAppear {
+            ToastManager.shared.useSystemColor = false
+            ToastManager.shared.foregroundColor = .black
+        }
+        .onDisappear {
+            ToastManager.shared.useSystemColor = true
+        }
     }
 
     private func loadAlbumTracks() async {

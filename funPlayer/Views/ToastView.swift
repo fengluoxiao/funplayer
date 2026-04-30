@@ -12,14 +12,20 @@ final class ToastManager: ObservableObject {
 
     @Published var message: String?
     @Published var isShowing = false
+    @Published var foregroundColor: Color = .black
+    @Published var useSystemColor: Bool = true
 
     private var workItem: DispatchWorkItem?
 
     private init() {}
 
-    func show(_ message: String, duration: TimeInterval = 2.0) {
+    func show(_ message: String, duration: TimeInterval = 2.0, foregroundColor: Color? = nil) {
         workItem?.cancel()
         self.message = message
+        if let foregroundColor = foregroundColor {
+            self.foregroundColor = foregroundColor
+            self.useSystemColor = false
+        }
         isShowing = true
 
         let item = DispatchWorkItem { [weak self] in
@@ -48,7 +54,7 @@ struct ToastOverlay: View {
             if toast.isShowing, let message = toast.message {
                 Text(message)
                     .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.black)
+                    .foregroundStyle(toast.useSystemColor ? Color.primary : toast.foregroundColor)
                     .padding(.horizontal, 20)
                     .padding(.vertical, 12)
                     .glassEffect(.clear, in: Capsule())
