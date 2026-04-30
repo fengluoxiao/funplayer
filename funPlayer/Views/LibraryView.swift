@@ -699,13 +699,13 @@ struct AlbumTrackListView: View {
         
         // 如果没有保存的曲目列表信息，或者解析失败，则使用下载记录中的基本信息
         if tracks.isEmpty {
-            for download in albumTracks.sorted(by: { $0.name < $1.name }) {
+            for download in albumTracks.sorted(by: { ($0.indexNumber ?? 0) < ($1.indexNumber ?? 0) }) {
                 let dto = BaseItemDto(
                     id: download.itemId,
                     name: download.name,
                     type: download.type,
                     overview: nil,
-                    indexNumber: nil,
+                    indexNumber: download.indexNumber,
                     parentIndexNumber: nil,
                     seriesName: nil,
                     album: download.name,
@@ -726,27 +726,52 @@ struct AlbumTrackListView: View {
         
         await MainActor.run {
             self.items = tracks
-            if self.albumItem == nil, let first = albumTracks.first {
-                self.albumItem = BaseItemDto(
-                    id: albumId,
-                    name: first.name,
-                    type: "MusicAlbum",
-                    overview: nil,
-                    indexNumber: nil,
-                    parentIndexNumber: nil,
-                    seriesName: nil,
-                    album: first.name,
-                    albumId: albumId,
-                    albumArtist: first.artist,
-                    artists: first.artist != nil ? [first.artist!] : nil,
-                    runTimeTicks: nil,
-                    userData: nil,
-                    primaryImageAspectRatio: nil,
-                    imageTags: nil,
-                    backdropImageTags: nil,
-                    mediaType: nil,
-                    collectionType: nil
-                )
+            if self.albumItem == nil {
+                // 优先使用专辑下载记录中的专辑信息
+                if let albumDownloadItem = DownloadManager.shared.getAlbumDownloadItem(albumId: albumId, serverId: serverId) {
+                    self.albumItem = BaseItemDto(
+                        id: albumId,
+                        name: albumDownloadItem.name,
+                        type: "MusicAlbum",
+                        overview: nil,
+                        indexNumber: nil,
+                        parentIndexNumber: nil,
+                        seriesName: nil,
+                        album: albumDownloadItem.name,
+                        albumId: albumId,
+                        albumArtist: albumDownloadItem.artist,
+                        artists: albumDownloadItem.artist != nil ? [albumDownloadItem.artist!] : nil,
+                        runTimeTicks: nil,
+                        userData: nil,
+                        primaryImageAspectRatio: nil,
+                        imageTags: nil,
+                        backdropImageTags: nil,
+                        mediaType: nil,
+                        collectionType: nil
+                    )
+                } else if let first = albumTracks.first {
+                    // 回退到第一首歌的信息（单曲下载场景）
+                    self.albumItem = BaseItemDto(
+                        id: albumId,
+                        name: first.name,
+                        type: "MusicAlbum",
+                        overview: nil,
+                        indexNumber: nil,
+                        parentIndexNumber: nil,
+                        seriesName: nil,
+                        album: first.name,
+                        albumId: albumId,
+                        albumArtist: first.artist,
+                        artists: first.artist != nil ? [first.artist!] : nil,
+                        runTimeTicks: nil,
+                        userData: nil,
+                        primaryImageAspectRatio: nil,
+                        imageTags: nil,
+                        backdropImageTags: nil,
+                        mediaType: nil,
+                        collectionType: nil
+                    )
+                }
             }
         }
     }

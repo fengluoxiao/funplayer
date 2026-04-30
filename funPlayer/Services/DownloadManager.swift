@@ -122,7 +122,8 @@ class DownloadManager: ObservableObject {
             artist: item.albumArtist ?? item.artists?.first,
             type: item.type,
             albumId: item.albumId,
-            isFavorite: isFavorite
+            isFavorite: isFavorite,
+            indexNumber: item.indexNumber
         )
 
         modelContext?.insert(downloadItem)
@@ -339,7 +340,8 @@ class DownloadManager: ObservableObject {
             artist: item.albumArtist ?? item.artists?.first,
             type: item.type,
             albumId: albumId,
-            isFavorite: isFavorite
+            isFavorite: isFavorite,
+            indexNumber: item.indexNumber
         )
 
         await MainActor.run {

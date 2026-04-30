@@ -52,6 +52,7 @@ final class PlayerManager: ObservableObject {
     @Published var showFullScreenPlayer = false
     @Published var showPlaylist = false
     @Published var accentColor: Color = Color(UIColor.systemBlue)
+    @Published var currentArtwork: UIImage?
 
     var currentItem: BaseItemDto? {
         guard queue.indices.contains(currentIndex) else { return nil }
@@ -393,6 +394,10 @@ final class PlayerManager: ObservableObject {
             if let image = UIImage(data: data) {
                 // 存入 ArtworkCache，供 popup bar 使用
                 ArtworkCache.shared.setImage(image, for: item.id)
+                // 同时设置到 currentArtwork，避免 View 重建丢失
+                await MainActor.run {
+                    self.currentArtwork = image
+                }
 
                 let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
                 var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
@@ -416,6 +421,10 @@ final class PlayerManager: ObservableObject {
            let data = try? Data(contentsOf: localArtworkURL),
            let image = UIImage(data: data) {
             ArtworkCache.shared.setImage(image, for: item.id)
+            // 同时设置到 currentArtwork，避免 View 重建丢失
+            await MainActor.run {
+                self.currentArtwork = image
+            }
             let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
             var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
             info[MPMediaItemPropertyArtwork] = artwork
@@ -436,6 +445,10 @@ final class PlayerManager: ObservableObject {
                 let (data, _) = try await URLSession.shared.data(from: url)
                 if let image = UIImage(data: data) {
                     ArtworkCache.shared.setImage(image, for: item.id)
+                    // 同时设置到 currentArtwork，避免 View 重建丢失
+                    await MainActor.run {
+                        self.currentArtwork = image
+                    }
                     let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
                     var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
                     info[MPMediaItemPropertyArtwork] = artwork
@@ -454,6 +467,9 @@ final class PlayerManager: ObservableObject {
 
         // 都失败了，尝试使用缓存的封面
         if let cachedImage = ArtworkCache.shared.image(for: item.id) {
+            await MainActor.run {
+                self.currentArtwork = cachedImage
+            }
             let artwork = MPMediaItemArtwork(boundsSize: cachedImage.size) { _ in cachedImage }
             var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
             info[MPMediaItemPropertyArtwork] = artwork

@@ -33,6 +33,7 @@ final class DownloadItem {
     var fileSize: Int64?
     var errorMessage: String?
     var albumTracksJson: String?
+    var indexNumber: Int?
 
     init(
         itemId: String,
@@ -41,7 +42,8 @@ final class DownloadItem {
         artist: String? = nil,
         type: String? = nil,
         albumId: String? = nil,
-        isFavorite: Bool = false
+        isFavorite: Bool = false,
+        indexNumber: Int? = nil
     ) {
         self.id = UUID().uuidString
         self.itemId = itemId
@@ -60,6 +62,7 @@ final class DownloadItem {
         self.fileSize = nil
         self.errorMessage = nil
         self.albumTracksJson = nil
+        self.indexNumber = indexNumber
     }
 
     var downloadStatus: DownloadStatus {

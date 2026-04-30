@@ -310,9 +310,18 @@ struct FullScreenPlayer: View {
     private func backgroundView() -> some View {
         let w = screenBounds.width
         let h = screenBounds.height
+        let itemId = player.currentItem?.id ?? ""
         Group {
-            if let cachedImage = ArtworkCache.shared.image(for: player.currentItem?.id ?? "") {
+            if let cachedImage = ArtworkCache.shared.image(for: itemId) {
                 Image(uiImage: cachedImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: w, height: h)
+                    .clipped()
+                    .blur(radius: 60)
+                    .overlay(Color.white.opacity(0.7))
+            } else if let localImage = localArtworkImage(for: itemId) {
+                Image(uiImage: localImage)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
                     .frame(width: w, height: h)
@@ -338,6 +347,14 @@ struct FullScreenPlayer: View {
             }
         }
         .ignoresSafeArea()
+    }
+
+    private func localArtworkImage(for itemId: String) -> UIImage? {
+        guard let localArtworkURL = DownloadManager.shared.getLocalArtworkURL(itemId: itemId),
+              let data = try? Data(contentsOf: localArtworkURL),
+              let image = UIImage(data: data) else { return nil }
+        ArtworkCache.shared.setImage(image, for: itemId)
+        return image
     }
 
     private func artworkURL() -> URL? {
@@ -369,8 +386,19 @@ struct FullScreenPlayer: View {
     }
 
     private func artworkImage() -> Image? {
-        guard let uiImage = ArtworkCache.shared.image(for: player.currentItem?.id ?? "") else { return nil }
-        return Image(uiImage: uiImage)
+        let itemId = player.currentItem?.id ?? ""
+        // 先读缓存
+        if let uiImage = ArtworkCache.shared.image(for: itemId) {
+            return Image(uiImage: uiImage)
+        }
+        // 缓存没有，尝试加载本地下载的封面
+        if let localArtworkURL = DownloadManager.shared.getLocalArtworkURL(itemId: itemId),
+           let data = try? Data(contentsOf: localArtworkURL),
+           let image = UIImage(data: data) {
+            ArtworkCache.shared.setImage(image, for: itemId)
+            return Image(uiImage: image)
+        }
+        return nil
     }
 
 }

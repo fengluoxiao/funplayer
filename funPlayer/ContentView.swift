@@ -192,8 +192,17 @@ private func makePopupItem() -> PopupItem<String, String, String, some ToolbarCo
 private func popupBarImage(for item: BaseItemDto?) -> PopupItemImage? {
     guard let item = item else { return nil }
 
+    // 先读内存缓存
     if let cachedImage = ArtworkCache.shared.image(for: item.id) {
         return PopupItemImage(Image(uiImage: cachedImage))
+    }
+
+    // 缓存没有，尝试加载本地下载的封面
+    if let localArtworkURL = DownloadManager.shared.getLocalArtworkURL(itemId: item.id),
+       let data = try? Data(contentsOf: localArtworkURL),
+       let image = UIImage(data: data) {
+        ArtworkCache.shared.setImage(image, for: item.id)
+        return PopupItemImage(Image(uiImage: image))
     }
 
     return nil

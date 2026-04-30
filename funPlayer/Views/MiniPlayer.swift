@@ -11,10 +11,20 @@ struct MiniPlayer: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            ArtworkContainer(itemId: player.currentItem?.id)
-                .frame(width: 40, height: 40)
-                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                .padding(.leading, 12)
+            // 直接使用 player.currentArtwork，避免 View 重建丢失
+            Group {
+                if let image = player.currentArtwork {
+                    Image(uiImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .clipped()
+                } else {
+                    Color.gray.opacity(0.3)
+                }
+            }
+            .frame(width: 40, height: 40)
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .padding(.leading, 12)
 
             TrackInfoView()
 
@@ -29,61 +39,6 @@ struct MiniPlayer: View {
             withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                 player.showFullScreenPlayer = true
             }
-        }
-        // 👇 核心修复：只有切歌才重建，播放/暂停不重建
-        .id(player.currentItem?.id ?? "noItem")
-    }
-}
-
-// MARK: - Artwork Container（彻底不闪版）
-struct ArtworkContainer: View {
-    let itemId: String?
-    @State private var artworkImage: UIImage?
-
-    var body: some View {
-        ZStack {
-            // 👇 永远保留上一张图，绝不闪灰！
-            if let image = artworkImage {
-                Image(uiImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .clipped()
-            } else {
-                // 只有第一次才显示灰色，加载后永远不显示
-                Color.gray.opacity(0.3)
-            }
-        }
-        .task(id: itemId) {
-            await loadArtwork()
-        }
-    }
-
-    private func loadArtwork() async {
-        guard let itemId = itemId,
-              let server = PlayerManager.shared.currentServer else {
-            // 👇 关键：不清空图片，所以不闪烁
-            // artworkImage = nil  ❌ 删掉这行！
-            return
-        }
-
-        // 先读缓存（秒显示，不闪）
-        if let cached = ArtworkCache.shared.image(for: itemId) {
-            artworkImage = cached
-            return
-        }
-
-        let client = JellyfinClient()
-        client.serverConfig = server
-        guard let url = client.imageURL(itemId: itemId, maxWidth: 200) else { return }
-
-        do {
-            let (data, _) = try await URLSession.shared.data(from: url)
-            if let image = UIImage(data: data) {
-                artworkImage = image
-                ArtworkCache.shared.setImage(image, for: itemId)
-            }
-        } catch {
-            // 失败也不清空，不闪烁
         }
     }
 }
