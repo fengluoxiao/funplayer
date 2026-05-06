@@ -18,6 +18,9 @@
     "%lld 个地址" : {
 
     },
+    "1.0" : {
+
+    },
     "Account" : {
       "localizations" : {
         "zh-Hans" : {
@@ -60,6 +63,7 @@
       }
     },
     "Auto Switch" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -112,6 +116,7 @@
       }
     },
     "Delete" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -120,9 +125,6 @@
           }
         }
       }
-    },
-    "Direct Play" : {
-
     },
     "Done" : {
       "localizations" : {
@@ -135,6 +137,7 @@
       }
     },
     "Edit" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -454,6 +457,7 @@
       }
     },
     "Speed Test" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -486,6 +490,7 @@
       }
     },
     "Switch to Best" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -496,6 +501,7 @@
       }
     },
     "Tap test to start" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -506,6 +512,7 @@
       }
     },
     "Test Results" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -516,6 +523,7 @@
       }
     },
     "Testing..." : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -537,6 +545,7 @@
       }
     },
     "Unreachable" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -582,13 +591,19 @@
     "下载管理" : {
 
     },
-    "下载设置" : {
-
-    },
     "主页" : {
 
     },
+    "关于" : {
+
+    },
+    "最近搜索" : {
+
+    },
     "最近添加" : {
+
+    },
+    "删除" : {
 
     },
     "删除下载" : {
@@ -606,13 +621,13 @@
     "媒体库" : {
 
     },
+    "尝试其他关键词" : {
+
+    },
     "已下载 (%lld)" : {
 
     },
     "已下载文件" : {
-
-    },
-    "已选媒体库" : {
 
     },
     "开始播放或向服务器添加媒体" : {
@@ -627,10 +642,13 @@
     "您还没有下载任何内容" : {
 
     },
+    "您还没有收藏任何%@。" : {
+
+    },
     "我的喜欢" : {
 
     },
-    "提示" : {
+    "搜索" : {
 
     },
     "播放设置" : {
@@ -642,7 +660,7 @@
     "服务器列表" : {
 
     },
-    "未知" : {
+    "未找到结果" : {
 
     },
     "未选择媒体库" : {
@@ -669,10 +687,10 @@
     "没有内容" : {
 
     },
-    "没有可用的媒体库" : {
+    "没有收藏" : {
 
     },
-    "没有喜欢的内容" : {
+    "测速并切换最佳地址" : {
 
     },
     "添加到喜欢" : {
@@ -681,13 +699,31 @@
     "添加服务器" : {
 
     },
+    "清除" : {
+
+    },
     "清除所有下载" : {
 
     },
-    "点击播放器中的爱心按钮收藏歌曲或专辑" : {
+    "热门搜索" : {
 
     },
-    "知道了" : {
+    "版本" : {
+
+    },
+    "直接播放" : {
+
+    },
+    "直接播放可能在网络不稳定时导致播放卡顿，建议在局域网环境下使用。" : {
+
+    },
+    "确定" : {
+
+    },
+    "离线模式" : {
+
+    },
+    "类型" : {
 
     },
     "设置" : {
@@ -706,9 +742,6 @@
 
     },
     "连接到你的 Jellyfin 服务器，开始享受你的媒体库。" : {
-
-    },
-    "需要重新播放音乐才能生效" : {
 
     }
   },

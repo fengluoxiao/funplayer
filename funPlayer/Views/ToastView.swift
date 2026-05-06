@@ -51,18 +51,42 @@ struct ToastOverlay: View {
     var body: some View {
         VStack {
             Spacer()
-            if toast.isShowing, let message = toast.message {
-                Text(message)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(toast.useSystemColor ? Color.primary : toast.foregroundColor)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 12)
-                    .glassEffect(.clear, in: Capsule())
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                    .padding(.bottom, bottomPadding)
-            }
+            toastContent
         }
         .animation(.easeInOut(duration: 0.3), value: toast.isShowing)
         .ignoresSafeArea()
+    }
+
+    @ViewBuilder
+    private var toastContent: some View {
+        if toast.isShowing {
+            if let message = toast.message {
+                ToastMessageView(
+                    message: message,
+                    foregroundColor: toast.foregroundColor,
+                    useSystemColor: toast.useSystemColor,
+                    bottomPadding: bottomPadding
+                )
+            }
+        }
+    }
+}
+
+struct ToastMessageView: View {
+    let message: String
+    let foregroundColor: Color
+    let useSystemColor: Bool
+    let bottomPadding: CGFloat
+
+    var body: some View {
+        let textColor: Color = useSystemColor ? Color.primary : foregroundColor
+        Text(message)
+            .font(.system(size: 14, weight: .medium))
+            .foregroundStyle(textColor)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+            .background(.ultraThinMaterial, in: Capsule())
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+            .padding(.bottom, bottomPadding)
     }
 }

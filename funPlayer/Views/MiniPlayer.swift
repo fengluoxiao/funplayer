@@ -57,7 +57,7 @@ private struct TrackInfoView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
-        // 👇 防止重绘抖动
+        // 防止重绘抖动
         .id(player.currentItem?.id ?? "info")
     }
 

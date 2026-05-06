@@ -84,15 +84,21 @@ struct FullScreenPlayer: View {
 
     @ViewBuilder
     private func closeButton() -> some View {
-        Button { player.showFullScreenPlayer = false } label: {
-            Image(systemName: "chevron.down")
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 44, height: 44)
-                .background(accentColor.opacity(0.8))
-                .clipShape(Circle())
+        HStack {
+            Button { player.showFullScreenPlayer = false } label: {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+                    .background(accentColor.opacity(0.8))
+                    .clipShape(Circle())
+            }
+
+            Spacer()
+
+
         }
-        .padding(.leading)
+        .padding(.horizontal)
     }
 
     private var safeAreaTop: CGFloat {

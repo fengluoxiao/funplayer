@@ -329,4 +329,35 @@ class JellyfinClient: ObservableObject {
 
         throw JellyfinError.noData
     }
+
+    // MARK: - Search
+
+    func search(query: String, parentId: String? = nil, limit: Int = 50) async throws -> [BaseItemDto] {
+        guard let userId = serverConfig?.userId else { throw JellyfinError.authenticationFailed }
+        var components = URLComponents(url: baseURL!.appendingPathComponent("/Users/\(userId)/Items"), resolvingAgainstBaseURL: true)!
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "SearchTerm", value: query),
+            URLQueryItem(name: "Limit", value: String(limit)),
+            URLQueryItem(name: "IncludeItemTypes", value: "Audio,MusicAlbum,MusicArtist,Movie,Series,Episode"),
+            URLQueryItem(name: "Recursive", value: "true"),
+            URLQueryItem(name: "Fields", value: "PrimaryImageAspectRatio,BasicSyncInfo,CanDelete,MediaSourceCount"),
+            URLQueryItem(name: "ImageTypeLimit", value: "1"),
+            URLQueryItem(name: "EnableImageTypes", value: "Primary,Backdrop,Thumb")
+        ]
+        if let pid = parentId { queryItems.append(URLQueryItem(name: "ParentId", value: pid)) }
+        components.queryItems = queryItems
+
+        guard let url = components.url else { throw JellyfinError.invalidURL }
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let token = serverConfig?.accessToken {
+            req.setValue("MediaBrowser Token=\"\(token)\", Client=\"funPlayer\", Device=\"iOS\", DeviceId=\"\(deviceId)\", Version=\"1.0\"", forHTTPHeaderField: "Authorization")
+        }
+
+        let (data, response) = try await session.data(for: req)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { throw JellyfinError.invalidResponse }
+        let result = try JSONDecoder().decode(BaseItemDtoQueryResult.self, from: data)
+        return result.items ?? []
+    }
 }

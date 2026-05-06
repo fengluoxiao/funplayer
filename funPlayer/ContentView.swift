@@ -3,6 +3,7 @@
 //  funPlayer
 //
 
+
 import SwiftUI
 import SwiftData
 import Combine
@@ -51,27 +52,22 @@ struct ContentView: View {
         for server in servers where server.allURLs.count > 1 {
             if let result = await service.autoSwitchBestURLWithTimeout(for: server, timeout: 10) {
                 if result.didSwitch {
-                    // 发生了切换，记录这次切换的URL
                     let newURL = server.allURLs[result.bestIndex]
                     server.setCurrentURL(index: result.bestIndex)
                     server.lastAutoSwitchedURL = newURL
                     try? modelContext.save()
                     didChangeAnyServer = true
                     print("[AutoSwitch] Server '\(server.name)' switched to \(newURL)")
-                }
-                // 如果没切换（主IP可用），清除切换记录
-                else if server.lastAutoSwitchedURL != nil {
+                } else if server.lastAutoSwitchedURL != nil {
                     server.lastAutoSwitchedURL = nil
                     try? modelContext.save()
                     didChangeAnyServer = true
                 }
             }
         }
-        // 如果有服务器发生了切换，通知SwiftUI刷新设置页面
         if didChangeAnyServer {
             appState.objectWillChange.send()
         }
-        // 刷新当前选中服务器的媒体库
         if let selected = appState.selectedServer {
             appState.selectServer(selected)
         }
@@ -91,10 +87,8 @@ struct ContentView: View {
         let player = PlayerManager.shared
         guard let item = player.currentItem, let server = player.currentServer else { return }
 
-        // 如果缓存中已有封面，不需要重新加载
         if ArtworkCache.shared.image(for: item.id) != nil { return }
 
-        // 异步重新加载封面
         Task {
             let client = JellyfinClient()
             client.serverConfig = server
@@ -111,100 +105,105 @@ struct ContentView: View {
     }
 
     private var mainTabView: some View {
-        TabView(selection: $selectedTab) {
-            HomeTabView()
-                .tabItem {
-                    Label("主页", systemImage: "house.fill")
+        ZStack(alignment: .bottomTrailing) {
+            TabView(selection: $selectedTab) {
+                Tab("主页", systemImage: "house.fill", value: 0) {
+                    NavigationStack {
+                        HomeTabView()
+                    }
                 }
-                .tag(0)
 
-            LibraryTabView()
-                .tabItem {
-                    Label("资料库", systemImage: "square.stack.fill")
+                Tab("资料库", systemImage: "square.stack.fill", value: 1) {
+                    NavigationStack {
+                        LibraryTabView()
+                    }
                 }
-                .tag(1)
 
-            NavigationStack {
-                SettingsTabView(showAddServer: $showAddServer)
+                Tab("设置", systemImage: "gear", value: 2) {
+                    NavigationStack {
+                        SettingsTabView(showAddServer: $showAddServer)
+                    }
+                }
+
+                Tab("搜索", systemImage: "magnifyingglass", value: 3, role: .search) {
+                    NavigationStack {
+                        SearchTabView()
+                    }
+                }
             }
-            .tabItem {
-                Label("设置", systemImage: "gear")
+            .toolbarColorScheme(.light, for: .tabBar)
+            .tabBarMinimizeBehavior(.onScrollDown)
+            .popup(isBarPresented: Binding(
+                get: { player.currentItem != nil },
+                set: { _ in }
+            ), isPopupOpen: $player.showFullScreenPlayer) {
+                FullScreenPlayer()
+                    .popupItem {
+                        makePopupItem()
+                    }
             }
-            .tag(2)
-        }
-        .toolbarColorScheme(.light, for: .tabBar)
-        .popup(isBarPresented: Binding(
-            get: { player.currentItem != nil },
-            set: { _ in }
-        ), isPopupOpen: $player.showFullScreenPlayer) {
-            FullScreenPlayer()
-                .popupItem {
-                    makePopupItem()
-                }
-        }
-        .popupBarStyle(.floatingCompact)
-        .popupCloseButtonStyle(.none)
-        .popupBarTitleTextAttributes(AttributeContainer().font(.systemFont(ofSize: 12, weight: .medium)))
-        .popupBarSubtitleTextAttributes(AttributeContainer().font(.systemFont(ofSize: 10)))
-        .popupBarCustomizer { popupBar in
-            popupBar.overrideUserInterfaceStyle = .light
-        }
-    }
-}
-
-private func artistText() -> String {
-    guard let item = PlayerManager.shared.currentItem else { return "" }
-    return item.albumArtist ?? item.artists?.first ?? item.album ?? ""
-}
-
-private func makePopupItem() -> PopupItem<String, String, String, some ToolbarContent> {
-    let player = PlayerManager.shared
-    let item = player.currentItem
-    let title = item?.name ?? "Not Playing"
-    let subtitle = artistText()
-    let image = popupBarImage(for: item)
-
-    return PopupItem(id: item?.id ?? "noItem", title: title, subtitle: subtitle, image: image) {
-        ToolbarItem(placement: .popupBar) {
-            HStack(spacing: 20) {
-                Button {
-                    player.togglePlayPause()
-                } label: {
-                    Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                }
-                .frame(minWidth: 30)
-
-                Button {
-                    player.nextTrack()
-                } label: {
-                    Image(systemName: "forward.fill")
-                }
-                .frame(minWidth: 30)
+            .popupBarStyle(.floatingCompact)
+            .popupCloseButtonStyle(.none)
+            .popupBarTitleTextAttributes(AttributeContainer().font(.systemFont(ofSize: 12, weight: .medium)))
+            .popupBarSubtitleTextAttributes(AttributeContainer().font(.systemFont(ofSize: 10)))
+            .popupBarCustomizer { popupBar in
+                popupBar.overrideUserInterfaceStyle = .light
             }
         }
     }
-}
 
-private func popupBarImage(for item: BaseItemDto?) -> PopupItemImage? {
-    guard let item = item else { return nil }
-
-    // 先读内存缓存
-    if let cachedImage = ArtworkCache.shared.image(for: item.id) {
-        return PopupItemImage(Image(uiImage: cachedImage))
+    private func artistText() -> String {
+        guard let item = PlayerManager.shared.currentItem else { return "" }
+        return item.albumArtist ?? item.artists?.first ?? item.album ?? ""
     }
 
-    // 缓存没有，尝试加载本地下载的封面
-    if let localArtworkURL = DownloadManager.shared.getLocalArtworkURL(itemId: item.id),
-       let data = try? Data(contentsOf: localArtworkURL),
-       let image = UIImage(data: data) {
-        ArtworkCache.shared.setImage(image, for: item.id)
-        return PopupItemImage(Image(uiImage: image))
+    private func makePopupItem() -> PopupItem<String, String, String, some ToolbarContent> {
+        let player = PlayerManager.shared
+        let item = player.currentItem
+        let title = item?.name ?? "Not Playing"
+        let subtitle = artistText()
+        let image = popupBarImage(for: item)
+
+        return PopupItem(id: item?.id ?? "noItem", title: title, subtitle: subtitle, image: image) {
+            ToolbarItem(placement: .popupBar) {
+                HStack(spacing: 20) {
+                    Button {
+                        player.togglePlayPause()
+                    } label: {
+                        Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                    }
+                    .frame(minWidth: 30)
+
+                    Button {
+                        player.nextTrack()
+                    } label: {
+                        Image(systemName: "forward.fill")
+                    }
+                    .frame(minWidth: 30)
+                }
+            }
+        }
     }
 
-    return nil
+    private func popupBarImage(for item: BaseItemDto?) -> PopupItemImage? {
+        guard let item = item else { return nil }
+
+        if let cachedImage = ArtworkCache.shared.image(for: item.id) {
+            return PopupItemImage(Image(uiImage: cachedImage))
+        }
+
+        if let localArtworkURL = DownloadManager.shared.getLocalArtworkURL(itemId: item.id),
+           let data = try? Data(contentsOf: localArtworkURL),
+           let image = UIImage(data: data) {
+            ArtworkCache.shared.setImage(image, for: item.id)
+            return PopupItemImage(Image(uiImage: image))
+        }
+
+        return nil
+    }
 }
 
-// MARK: - 欢迎页面（首次启动）
+// MARK: - Welcome View
 
 struct WelcomeView: View {
     @Binding var showAddServer: Bool
@@ -244,7 +243,7 @@ struct WelcomeView: View {
     }
 }
 
-// MARK: - 主页页签
+// MARK: - Home Tab
 
 struct HomeTabView: View {
     @StateObject private var appState = AppState.shared
@@ -350,7 +349,6 @@ struct HomeTabView: View {
                 }
             }
             .onReceive(downloadManager.objectWillChange) {
-                // Refresh when downloads change
             }
         }
     }
@@ -380,15 +378,11 @@ struct HomeTabView: View {
 
         client.serverConfig = server
 
-        // 如果开启只显示下载内容，直接从本地下载记录加载，不请求服务器
         if server.showDownloadedOnly {
             isLoading = true
             let downloadedItems = downloadManager.getDownloadedItems(forServerId: server.id.uuidString)
-            // 将下载记录转换为 BaseItemDto 用于展示
             var items: [BaseItemDto] = []
             for download in downloadedItems {
-                // 尝试获取完整的 item 信息（如果有缓存）
-                // 否则创建一个基本的 BaseItemDto
                 let dto = BaseItemDto(
                     id: download.itemId,
                     name: download.name,
@@ -527,7 +521,7 @@ struct HomeItemCard: View {
     }
 }
 
-// MARK: - Library Tab (Apple Music Style)
+// MARK: - Library Tab
 
 enum LibraryCategory: String, CaseIterable, Identifiable {
     case favorites = "我的喜欢"
@@ -640,7 +634,6 @@ struct LibraryTabView: View {
                 }
             }
             .onReceive(downloadManager.objectWillChange) {
-                // Refresh when downloads change
             }
         }
     }
@@ -669,7 +662,6 @@ struct LibraryTabView: View {
                         .padding(.top, 16)
                     }
 
-                    // Category List (Apple Music Style)
                     VStack(spacing: 0) {
                         ForEach(displayedCategories) { category in
                             NavigationLink(value: category) {
@@ -684,7 +676,6 @@ struct LibraryTabView: View {
                     }
                     .padding(.horizontal, 16)
 
-                    // Recently Added Section (Albums)
                     if !filteredAlbums.isEmpty {
                         VStack(alignment: .leading, spacing: 12) {
                             Text("最近添加")
@@ -744,7 +735,6 @@ struct LibraryTabView: View {
 
         client.serverConfig = server
 
-        // 如果开启只显示下载内容，直接从本地下载记录加载，不请求服务器
         if server.showDownloadedOnly {
             isLoading = true
             let downloadedItems = downloadManager.getDownloadedItems(forServerId: server.id.uuidString)
@@ -777,9 +767,7 @@ struct LibraryTabView: View {
                     albumMap[download.itemId] = dto
                 } else if download.type == "Audio" {
                     allSongs.append(dto)
-                    // 从单曲中收集专辑信息
                     if let albumId = download.albumId, !albumId.isEmpty, albumMap[albumId] == nil {
-                        // 尝试查找专辑下载记录获取更完整的信息
                         if let albumDownload = downloadManager.getAlbumDownloadItem(albumId: albumId, serverId: server.id.uuidString) {
                             albumMap[albumId] = BaseItemDto(
                                 id: albumId,
@@ -802,7 +790,6 @@ struct LibraryTabView: View {
                                 collectionType: nil
                             )
                         } else {
-                            // 没有专辑下载记录，用单曲信息创建专辑信息
                             albumMap[albumId] = BaseItemDto(
                                 id: albumId,
                                 name: download.name,
@@ -830,7 +817,6 @@ struct LibraryTabView: View {
 
             allAlbums = Array(albumMap.values).sorted { ($0.name ?? "") < ($1.name ?? "") }
 
-            // 从下载记录中提取艺人（根据专辑艺术家或单曲艺术家）
             var artistMap: [String: BaseItemDto] = [:]
             for download in downloadedItems {
                 if let artist = download.artist, !artist.isEmpty {
@@ -878,21 +864,18 @@ struct LibraryTabView: View {
                 let library = try await client.getItem(itemId: libraryId)
 
                 if library.collectionType == "music" {
-                    // Load albums
                     async let albumItems = client.getItems(
                         parentId: libraryId,
                         recursive: true,
                         includeItemTypes: "MusicAlbum",
                         sortBy: "SortName"
                     )
-                    // Load artists
                     async let artistItems = client.getItems(
                         parentId: libraryId,
                         recursive: true,
                         includeItemTypes: "MusicArtist",
                         sortBy: "SortName"
                     )
-                    // Load songs
                     async let songItems = client.getItems(
                         parentId: libraryId,
                         recursive: true,
@@ -1071,7 +1054,6 @@ struct LibraryAlbumCard: View {
                     }
                 } catch {
                     print("[LibraryAlbumCard] Error loading album tracks: \(error)")
-                    // 离线时尝试播放专辑中已下载的曲目
                     await playDownloadedAlbumTracks(server: server)
                 }
             }
@@ -1082,7 +1064,6 @@ struct LibraryAlbumCard: View {
 
     private func playDownloadedAlbumTracks(server: ServerConfig) async {
         let downloadedItems = DownloadManager.shared.getDownloadedItems(forServerId: server.id.uuidString)
-        // 这里无法精确匹配专辑下的曲目，所以播放所有已下载的曲目作为 fallback
         guard !downloadedItems.isEmpty else {
             ToastManager.shared.show("没有已下载的曲目")
             return
@@ -1098,7 +1079,7 @@ struct LibraryAlbumCard: View {
                 parentIndexNumber: nil,
                 seriesName: nil,
                 album: nil,
-                    albumId: nil,
+                albumId: nil,
                 albumArtist: download.artist,
                 artists: download.artist != nil ? [download.artist!] : nil,
                 runTimeTicks: nil,
@@ -1140,10 +1121,8 @@ struct LibraryCategoryView: View {
                     description: Text("您的库中没有\(category.rawValue)。")
                 )
             } else if category == .albums {
-                // Apple Music Style Album List
                 albumListView
             } else if category == .artists {
-                // Apple Music Style Artist List
                 artistListView
             } else {
                 List {
@@ -1249,7 +1228,6 @@ struct ArtistAlbumsView: View {
                     description: Text("该艺人没有专辑。")
                 )
             } else {
-                // Apple Music Style Album List
                 ScrollView {
                     VStack(spacing: 0) {
                         ForEach(Array(albums.enumerated()), id: \.element.id) { index, item in
@@ -1292,7 +1270,7 @@ struct ArtistAlbumsView: View {
     }
 }
 
-// MARK: - 设置页签
+// MARK: - Settings Tab
 
 struct SettingsTabView: View {
     @Binding var showAddServer: Bool
@@ -1306,260 +1284,325 @@ struct SettingsTabView: View {
     @State private var speedTestServer: ServerConfig?
     @State private var showDirectPlayAlert = false
     @State private var path = NavigationPath()
+    @State private var showDownloadedOnly = false
+    @State private var allowDirectPlay = false
 
     var body: some View {
         NavigationStack(path: $path) {
+            settingsList
+        }
+        .sheet(item: $editingServer) { server in
+            ServerSetupView(showAddServer: .constant(false), editingServer: server)
+        }
+    }
+
+    private var settingsList: some View {
         List {
-            Section(String(localized: "当前服务器")) {
-                if let selected = appState.selectedServer {
-                    HStack(spacing: 16) {
-                        ZStack {
-                            Circle()
-                                .fill(selected.isAuthenticated ? Color.green.opacity(0.15) : Color.gray.opacity(0.15))
-                                .frame(width: 48, height: 48)
-                            Image(systemName: "server.rack")
-                                .font(.system(size: 22))
-                                .foregroundStyle(selected.isAuthenticated ? .green : .secondary)
-                        }
+            CurrentServerSection(
+                selectedServer: appState.selectedServer,
+                showAddServer: $showAddServer,
+                editingServer: $editingServer
+            )
 
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(selected.name)
-                                .font(.headline)
-                            Text(selected.currentURL)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                            if selected.allURLs.count > 1 {
-                                Text("\(selected.allURLs.count) 个地址")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            if let username = selected.username {
-                                Text(username)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
+            ServerListSection(
+                servers: servers,
+                selectedServerId: appState.selectedServer?.id,
+                showAddServer: $showAddServer,
+                onSelect: { appState.selectServer($0) },
+                onDelete: deleteServer
+            )
 
-                        Spacer()
+            if let server = appState.selectedServer, server.isAuthenticated {
+                LibrariesSection(
+                    isLoading: isLoadingLibraries,
+                    libraries: libraries,
+                    appState: appState,
+                    modelContext: modelContext
+                )
 
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.title3)
-                            .foregroundStyle(.tint)
-                    }
-                    .padding(.vertical, 6)
-                } else {
-                    Text(String(localized: "未选择服务器"))
+                PlaybackSettingsSection(
+                    server: server,
+                    showDownloadedOnly: $showDownloadedOnly,
+                    allowDirectPlay: $allowDirectPlay,
+                    showDirectPlayAlert: $showDirectPlayAlert,
+                    speedTestServer: $speedTestServer,
+                    modelContext: modelContext
+                )
+            }
+
+            Section(String(localized: "关于")) {
+                HStack {
+                    Image(systemName: "info.circle")
+                    Text("版本")
+                    Spacer()
+                    Text("1.0")
                         .foregroundStyle(.secondary)
-                }
-            }
-
-            if isLoadingLibraries {
-                Section(String(localized: "媒体库")) {
-                    HStack {
-                        Spacer()
-                        ProgressView()
-                        Spacer()
-                    }
-                }
-            } else if libraries.isEmpty {
-                Section(String(localized: "媒体库")) {
-                    Text(String(localized: "没有可用的媒体库"))
-                        .foregroundStyle(.secondary)
-                }
-            } else {
-                let selectedLibraries = libraries.filter { appState.selectedLibraryIds.contains($0.id) }
-                let unselectedLibraries = libraries.filter { !appState.selectedLibraryIds.contains($0.id) }
-
-                if !selectedLibraries.isEmpty {
-                    Section(String(localized: "已选媒体库")) {
-                        ForEach(selectedLibraries) { library in
-                            Button {
-                                appState.toggleLibrary(library.id, modelContext: modelContext)
-                            } label: {
-                                HStack(spacing: 12) {
-                                    Image(systemName: "checkmark.square.fill")
-                                        .font(.title3)
-                                        .foregroundStyle(.blue)
-
-                                    AsyncImage(url: client.imageURL(itemId: library.id, maxWidth: 200)) { phase in
-                                        if let image = phase.image {
-                                            image
-                                                .resizable()
-                                                .aspectRatio(contentMode: .fill)
-                                        } else {
-                                            RoundedRectangle(cornerRadius: 8)
-                                                .fill(.gray.opacity(0.2))
-                                        }
-                                    }
-                                    .frame(width: 50, height: 50)
-                                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(library.name ?? String(localized: "未知"))
-                                            .font(.headline)
-                                        if let collectionType = library.collectionType {
-                                            Text(collectionType.capitalized)
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                        }
-                                    }
-
-                                    Spacer()
-                                }
-                                .padding(.vertical, 4)
-                            }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(.primary)
-                        }
-                    }
-                }
-
-                if !unselectedLibraries.isEmpty {
-                    Section(String(localized: "媒体库")) {
-                        ForEach(unselectedLibraries) { library in
-                            Button {
-                                appState.toggleLibrary(library.id, modelContext: modelContext)
-                            } label: {
-                                HStack(spacing: 12) {
-                                    Image(systemName: "square")
-                                        .font(.title3)
-                                        .foregroundStyle(.secondary)
-
-                                    AsyncImage(url: client.imageURL(itemId: library.id, maxWidth: 200)) { phase in
-                                        if let image = phase.image {
-                                            image
-                                                .resizable()
-                                                .aspectRatio(contentMode: .fill)
-                                        } else {
-                                            RoundedRectangle(cornerRadius: 8)
-                                                .fill(.gray.opacity(0.2))
-                                        }
-                                    }
-                                    .frame(width: 50, height: 50)
-                                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(library.name ?? String(localized: "未知"))
-                                            .font(.headline)
-                                        if let collectionType = library.collectionType {
-                                            Text(collectionType.capitalized)
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                        }
-                                    }
-
-                                    Spacer()
-                                }
-                                .padding(.vertical, 4)
-                            }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(.primary)
-                        }
-                    }
-                }
-            }
-
-            if let selected = appState.selectedServer {
-                Section(String(localized: "播放设置")) {
-                    Toggle(String(localized: "Direct Play"), isOn: Binding(
-                        get: { selected.enableDirectPlay },
-                        set: { newValue in
-                            selected.enableDirectPlay = newValue
-                            try? modelContext.save()
-                            showDirectPlayAlert = true
-                        }
-                    ))
-                }
-
-                Section(String(localized: "下载设置")) {
-                    Toggle(String(localized: "只显示下载内容"), isOn: Binding(
-                        get: { selected.showDownloadedOnly },
-                        set: { newValue in
-                            selected.showDownloadedOnly = newValue
-                            try? modelContext.save()
-                            appState.objectWillChange.send()
-                        }
-                    ))
-
-                    NavigationLink(value: "downloads") {
-                        HStack {
-                            Image(systemName: "arrow.down.circle")
-                            Text("下载管理")
-                            Spacer()
-                        }
-                    }
-                }
-            }
-
-            Section(String(localized: "服务器列表")) {
-                ForEach(servers) { server in
-                    serverRow(server: server)
-                        .swipeActions(edge: .trailing) {
-                            Button(role: .destructive) {
-                                deleteServer(server)
-                            } label: {
-                                Label(String(localized: "Delete"), systemImage: "trash")
-                            }
-                        }
-                        .swipeActions(edge: .leading) {
-                            Button {
-                                editingServer = server
-                            } label: {
-                                Label(String(localized: "Edit"), systemImage: "pencil")
-                            }
-                            .tint(.blue)
-                        }
-                }
-
-                Button {
-                    showAddServer = true
-                } label: {
-                    Label(String(localized: "添加服务器"), systemImage: "plus")
                 }
             }
         }
-        .listStyle(.insetGrouped)
         .navigationTitle("设置")
         .task {
             await loadLibraries()
         }
         .onChange(of: appState.selectedServer) {
+            if let server = appState.selectedServer {
+                showDownloadedOnly = server.showDownloadedOnly
+                allowDirectPlay = server.enableDirectPlay
+            }
             Task {
                 await loadLibraries()
             }
         }
-        .sheet(item: $editingServer) { server in
-            ServerSetupView(showAddServer: $showAddServer, editingServer: server, onDismiss: {
-                editingServer = nil
-            })
-        }
-        .sheet(item: $speedTestServer) { server in
-            SpeedTestSheet(server: server)
-        }
-        .alert(String(localized: "提示"), isPresented: $showDirectPlayAlert) {
-            Button(String(localized: "知道了"), role: .cancel) { }
-        } message: {
-            Text(String(localized: "需要重新播放音乐才能生效"))
-        }
-        .navigationDestination(for: String.self) { value in
-            if value == "downloads" {
-                DownloadsView(path: $path)
+        .onAppear {
+            if let server = appState.selectedServer {
+                showDownloadedOnly = server.showDownloadedOnly
+                allowDirectPlay = server.enableDirectPlay
             }
-        }
         }
     }
 
-    private func serverRow(server: ServerConfig) -> some View {
-        HStack(spacing: 16) {
-            ZStack {
-                Circle()
-                    .fill(server.isAuthenticated ? Color.green.opacity(0.15) : Color.gray.opacity(0.15))
-                    .frame(width: 48, height: 48)
-                Image(systemName: "server.rack")
-                    .font(.system(size: 22))
-                    .foregroundStyle(server.isAuthenticated ? .green : .secondary)
+    private func deleteServer(at offsets: IndexSet) {
+        for offset in offsets {
+            let server = servers[offset]
+            modelContext.delete(server)
+            if appState.selectedServer?.id == server.id {
+                appState.selectServer(nil)
             }
+        }
+        try? modelContext.save()
+    }
+
+    private func loadLibraries() async {
+        guard let server = appState.selectedServer, server.isAuthenticated else {
+            libraries = []
+            return
+        }
+
+        isLoadingLibraries = true
+        client.serverConfig = server
+        do {
+            libraries = try await client.getViews()
+        } catch {
+            print("[SettingsTabView] Error loading libraries: \(error)")
+            libraries = []
+        }
+        isLoadingLibraries = false
+    }
+}
+
+// MARK: - Settings Subviews
+
+struct ServerRow: View {
+    let server: ServerConfig
+    let isSelected: Bool
+    let onSelect: () -> Void
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(spacing: 12) {
+                ServerIcon(isAuthenticated: server.isAuthenticated, size: 40, iconSize: 18)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(server.name)
+                        .font(.system(size: 16))
+                    Text(server.currentURL)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .foregroundStyle(Color.accentColor)
+                }
+            }
+        }
+    }
+}
+
+struct ServerIcon: View {
+    let isAuthenticated: Bool
+    let size: CGFloat
+    let iconSize: CGFloat
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(isAuthenticated ? Color.green.opacity(0.15) : Color.gray.opacity(0.15))
+                .frame(width: size, height: size)
+            Image(systemName: "server.rack")
+                .font(.system(size: iconSize))
+                .foregroundStyle(isAuthenticated ? .green : .secondary)
+        }
+    }
+}
+
+struct AddServerButton: View {
+    @Binding var showAddServer: Bool
+
+    var body: some View {
+        Button {
+            showAddServer = true
+        } label: {
+            HStack {
+                Image(systemName: "plus")
+                    .foregroundStyle(Color.accentColor)
+                Text("添加服务器")
+            }
+        }
+    }
+}
+
+struct LibrariesSection: View {
+    let isLoading: Bool
+    let libraries: [BaseItemDto]
+    let appState: AppState
+    let modelContext: ModelContext
+
+    var body: some View {
+        Section(String(localized: "媒体库")) {
+            if isLoading {
+                HStack {
+                    Spacer()
+                    ProgressView()
+                    Spacer()
+                }
+            } else {
+                ForEach(libraries) { library in
+                    LibraryRow(
+                        library: library,
+                        isSelected: appState.selectedLibraryIds.contains(library.id),
+                        onToggle: { appState.toggleLibrary(library.id, modelContext: modelContext) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+struct LibraryRow: View {
+    let library: BaseItemDto
+    let isSelected: Bool
+    let onToggle: () -> Void
+
+    private var iconName: String {
+        switch library.collectionType {
+        case "music": return "music.note"
+        case "tvshows": return "tv"
+        case "movies": return "film"
+        default: return "folder"
+        }
+    }
+
+    var body: some View {
+        Button(action: onToggle) {
+            HStack {
+                Image(systemName: iconName)
+                    .foregroundStyle(Color.accentColor)
+                Text(library.name ?? "")
+                Spacer()
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+            }
+        }
+    }
+}
+
+struct PlaybackSettingsSection: View {
+    let server: ServerConfig
+    @Binding var showDownloadedOnly: Bool
+    @Binding var allowDirectPlay: Bool
+    @Binding var showDirectPlayAlert: Bool
+    @Binding var speedTestServer: ServerConfig?
+    var modelContext: ModelContext
+
+    var body: some View {
+        Section(String(localized: "播放设置")) {
+            Toggle(isOn: $showDownloadedOnly) {
+                HStack {
+                    Image(systemName: "arrow.down.circle")
+                    Text("离线模式")
+                }
+            }
+            .onChange(of: showDownloadedOnly) {
+                server.showDownloadedOnly = showDownloadedOnly
+                try? modelContext.save()
+            }
+
+            Toggle(isOn: $allowDirectPlay) {
+                HStack {
+                    Image(systemName: "waves")
+                    Text("直接播放")
+                }
+            }
+            .onChange(of: allowDirectPlay) {
+                server.enableDirectPlay = allowDirectPlay
+                try? modelContext.save()
+                if allowDirectPlay {
+                    showDirectPlayAlert = true
+                }
+            }
+            .alert("直接播放", isPresented: $showDirectPlayAlert) {
+                Button("确定", role: .cancel) {}
+            } message: {
+                Text("直接播放可能在网络不稳定时导致播放卡顿，建议在局域网环境下使用。")
+            }
+
+            if server.allURLs.count > 1 {
+                SpeedTestButton(server: server, speedTestServer: $speedTestServer)
+            }
+        }
+    }
+}
+
+struct SpeedTestButton: View {
+    let server: ServerConfig
+    @Binding var speedTestServer: ServerConfig?
+
+    var body: some View {
+        Button {
+            speedTestServer = server
+        } label: {
+            HStack {
+                Image(systemName: "wifi")
+                Text("测速并切换最佳地址")
+                Spacer()
+                if speedTestServer?.id == server.id {
+                    ProgressView()
+                }
+            }
+        }
+        .disabled(speedTestServer != nil)
+    }
+}
+
+struct CurrentServerSection: View {
+    let selectedServer: ServerConfig?
+    @Binding var showAddServer: Bool
+    @Binding var editingServer: ServerConfig?
+
+    var body: some View {
+        Section(String(localized: "当前服务器")) {
+            if let selected = selectedServer {
+                CurrentServerRow(server: selected, onTap: {
+                    editingServer = selected
+                })
+            } else {
+                AddServerButton(showAddServer: $showAddServer)
+            }
+        }
+    }
+}
+
+struct CurrentServerRow: View {
+    let server: ServerConfig
+    let onTap: () -> Void
+
+    var body: some View {
+        HStack(spacing: 16) {
+            ServerIcon(isAuthenticated: server.isAuthenticated, size: 48, iconSize: 22)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(server.name)
@@ -1573,627 +1616,181 @@ struct SettingsTabView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                if let username = server.username {
-                    Text(username)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
             }
 
             Spacer()
 
-            if appState.selectedServer?.id == server.id {
-                Image(systemName: "checkmark")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tint)
-            }
+            Image(systemName: "chevron.right")
+                .foregroundStyle(.secondary)
         }
-        .padding(.vertical, 6)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            appState.selectServer(server)
-            Task {
-                await loadLibraries()
-            }
-        }
-        .contextMenu {
-            Button {
-                editingServer = server
-            } label: {
-                Label(String(localized: "Edit"), systemImage: "pencil")
-            }
-
-            Button {
-                speedTestServer = server
-            } label: {
-                Label(String(localized: "Speed Test"), systemImage: "bolt.horizontal")
-            }
-
-            if server.allURLs.count > 1 {
-                Button {
-                    Task {
-                        await autoSwitchBestURL(for: server)
-                    }
-                } label: {
-                    Label(String(localized: "Auto Switch"), systemImage: "arrow.left.arrow.right")
-                }
-            }
-
-            Button(role: .destructive) {
-                deleteServer(server)
-            } label: {
-                Label(String(localized: "Delete"), systemImage: "trash")
-            }
-        }
-    }
-
-    private func autoSwitchBestURL(for server: ServerConfig) async {
-        let service = ServerSpeedTestService()
-        if let result = await service.autoSwitchBestURLWithTimeout(for: server, timeout: 10) {
-            let newURL = server.allURLs[result.bestIndex]
-            server.setCurrentURL(index: result.bestIndex)
-            if result.didSwitch {
-                server.lastAutoSwitchedURL = newURL
-            } else {
-                server.lastAutoSwitchedURL = nil
-            }
-            try? modelContext.save()
-            if appState.selectedServer?.id == server.id {
-                appState.selectServer(server)
-                await loadLibraries()
-            }
-        }
-    }
-
-    private func deleteServer(_ server: ServerConfig) {
-        withAnimation {
-            modelContext.delete(server)
-            if appState.selectedServer?.id == server.id {
-                appState.selectServer(servers.first(where: { $0.id != server.id }))
-            }
-        }
-    }
-
-    private func loadLibraries() async {
-        guard let server = appState.selectedServer, server.isAuthenticated else {
-            libraries = []
-            return
-        }
-        isLoadingLibraries = true
-        client.serverConfig = server
-        do {
-            libraries = try await client.getViews()
-        } catch {
-            print("[SettingsTabView] Error loading libraries: \(error)")
-            libraries = []
-        }
-        isLoadingLibraries = false
-    }
-
-    private func deleteServers(offsets: IndexSet) {
-        withAnimation {
-            for index in offsets {
-                let server = servers[index]
-                modelContext.delete(server)
-                if appState.selectedServer?.id == server.id {
-                    appState.selectServer(servers.first(where: { $0.id != server.id }))
-                }
-            }
-        }
+        .onTapGesture(perform: onTap)
     }
 }
 
-// MARK: - Speed Test Sheet
-
-struct SpeedTestSheet: View {
-    let server: ServerConfig
-    @StateObject private var speedTestService = ServerSpeedTestService()
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.modelContext) private var modelContext
-    @StateObject private var appState = AppState.shared
+struct ServerListSection: View {
+    let servers: [ServerConfig]
+    let selectedServerId: UUID?
+    @Binding var showAddServer: Bool
+    let onSelect: (ServerConfig) -> Void
+    let onDelete: (IndexSet) -> Void
 
     var body: some View {
-        NavigationStack {
-            List {
-                Section {
-                    HStack(spacing: 16) {
-                        ZStack {
-                            Circle()
-                                .fill(Color.blue.opacity(0.15))
-                                .frame(width: 48, height: 48)
-                            Image(systemName: "server.rack")
-                                .font(.system(size: 22))
-                                .foregroundStyle(.blue)
-                        }
-
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(server.name)
-                                .font(.headline)
-                            Text("\(server.allURLs.count) 个地址")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-
-                        Spacer()
-                    }
-                    .padding(.vertical, 4)
-                }
-
-                if speedTestService.isTesting {
-                    Section {
-                        HStack {
-                            Spacer()
-                            VStack(spacing: 12) {
-                                ProgressView()
-                                    .scaleEffect(1.2)
-                                Text(String(localized: "Testing..."))
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                        }
-                        .padding(.vertical, 20)
-                    }
-                } else if speedTestService.results.isEmpty {
-                    Section {
-                        HStack {
-                            Spacer()
-                            Text(String(localized: "Tap test to start"))
-                                .foregroundStyle(.secondary)
-                                .padding(.vertical, 20)
-                            Spacer()
-                        }
-                    }
-                } else {
-                    Section(String(localized: "Test Results")) {
-                        ForEach(speedTestService.results) { result in
-                            HStack {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(result.url)
-                                        .font(.subheadline)
-                                        .lineLimit(1)
-                                    if result.isReachable {
-                                        HStack(spacing: 4) {
-                                            Circle()
-                                                .fill(latencyColor(result.latency))
-                                                .frame(width: 8, height: 8)
-                                            Text(result.displayLatency)
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                        }
-                                    } else {
-                                        Text(String(localized: "Unreachable"))
-                                            .font(.caption)
-                                            .foregroundStyle(.red)
-                                    }
-                                }
-
-                                Spacer()
-
-                                if result.isReachable {
-                                    if let best = speedTestService.results.first(where: { $0.isReachable }),
-                                       result.id == best.id {
-                                        Image(systemName: "checkmark.seal.fill")
-                                            .foregroundStyle(.green)
-                                            .font(.caption)
-                                    }
-                                }
-                            }
-                            .padding(.vertical, 4)
-                        }
-                    }
-
-                    if let best = speedTestService.results.first(where: { $0.isReachable }) {
-                        Section {
-                            Button {
-                                applyBestURL(best)
-                            } label: {
-                                HStack {
-                                    Spacer()
-                                    Text(String(localized: "Switch to Best"))
-                                        .fontWeight(.semibold)
-                                    Spacer()
-                                }
-                            }
-                            .listRowBackground(Color.blue)
-                            .foregroundStyle(.white)
-                        }
-                    }
-                }
+        Section(String(localized: "服务器列表")) {
+            ForEach(servers, id: \.id) { server in
+                ServerRow(
+                    server: server,
+                    isSelected: selectedServerId == server.id,
+                    onSelect: { onSelect(server) }
+                )
             }
-            .navigationTitle(String(localized: "Speed Test"))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(String(localized: "Done")) {
-                        dismiss()
-                    }
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        Task {
-                            await speedTestService.testServer(server)
-                        }
-                    } label: {
-                        Image(systemName: "bolt.horizontal")
-                    }
-                    .disabled(speedTestService.isTesting)
-                }
-            }
+            .onDelete(perform: onDelete)
+
+            AddServerButton(showAddServer: $showAddServer)
         }
-    }
-
-    private func latencyColor(_ latency: Double) -> Color {
-        if latency < 0.1 { return .green }
-        if latency < 0.3 { return .yellow }
-        return .red
-    }
-
-    private func applyBestURL(_ result: SpeedTestResult) {
-        let urls = server.allURLs
-        if let index = urls.firstIndex(where: { $0 == result.url }) {
-            server.setCurrentURL(index: index)
-            try? modelContext.save()
-            if appState.selectedServer?.id == server.id {
-                appState.selectServer(server)
-            }
-        }
-        dismiss()
     }
 }
 
-// MARK: - 我的喜欢
+// MARK: - MiniPlayer Accessory View
 
-struct FavoritesView: View {
-    let server: ServerConfig
-    @Binding var path: NavigationPath
-    @StateObject private var favorites = FavoritesManager.shared
-                                                                                                                                                                                @StateObject private var appState = AppState.shared
-    @State private var trackItems: [FavoriteItem] = []
-    @State private var albumItems: [FavoriteItem] = []
-
-    private var client: JellyfinClient {
-        let c = JellyfinClient()
-        c.serverConfig = server
-        return c
-    }
+struct MiniPlayerAccessoryView: View {
+    @StateObject private var player = PlayerManager.shared
+    @Environment(\.tabViewBottomAccessoryPlacement) private var placement
 
     var body: some View {
         Group {
-            if trackItems.isEmpty && albumItems.isEmpty {
-                ContentUnavailableView(
-                    "没有喜欢的内容",
-                    systemImage: "heart.slash",
-                    description: Text("点击播放器中的爱心按钮收藏歌曲或专辑")
-                )
-            } else {
-                ScrollView {
-                    VStack(spacing: 24) {
-                        if !trackItems.isEmpty {
-                            FavoriteSection(
-                                title: "单曲",
-                                items: trackItems,
-                                client: client,
-                                server: server,
-                                path: $path
-                            )
-                        }
-                        if !albumItems.isEmpty {
-                            FavoriteSection(
-                                title: "专辑",
-                                items: albumItems,
-                                client: client,
-                                server: server,
-                                path: $path
-                            )
-                        }
-                    }
-                    .padding(.vertical, 16)
-                }
+            switch placement {
+            case .inline:
+                InlineMiniPlayerView()
+            case .expanded, .none:
+                ExpandedMiniPlayerView()
             }
-        }
-        .navigationTitle("我的喜欢")
-        .task {
-            loadFavorites()
-        }
-        .onAppear {
-            loadFavorites()
-        }
-        .onReceive(favorites.objectWillChange) {
-            loadFavorites()
-        }
-        .onChange(of: appState.selectedLibraryIds) {
-            loadFavorites()
-        }
-    }
-
-    private func loadFavorites() {
-        trackItems = favorites.getFavorites(
-            forServerId: server.id.uuidString,
-            libraryIds: appState.selectedLibraryIds,
-            type: .track
-        )
-        albumItems = favorites.getFavorites(
-            forServerId: server.id.uuidString,
-            libraryIds: appState.selectedLibraryIds,
-            type: .album
-        )
-    }
-}
-
-struct FavoriteSection: View {
-    let title: String
-    let items: [FavoriteItem]
-    let client: JellyfinClient
-    let server: ServerConfig
-    @Binding var path: NavigationPath
-
-    private let columns = [
-        GridItem(.flexible()),
-        GridItem(.flexible()),
-        GridItem(.flexible())
-    ]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            NavigationLink {
-                FavoriteListView(
-                    title: title,
-                    items: items,
-                    client: client,
-                    server: server,
-                    path: $path
-                )
-            } label: {
-                HStack(spacing: 4) {
-                    Text(title)
-                        .font(.title3.bold())
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 14, weight: .semibold))
-                }
-                .foregroundStyle(.primary)
-            }
-            .buttonStyle(.plain)
-            .padding(.horizontal, 16)
-
-            LazyVGrid(columns: columns, spacing: 12) {
-                ForEach(items.prefix(6)) { item in
-                    FavoriteGridItem(item: item, client: client, server: server, path: $path)
-                }
-            }
-            .padding(.horizontal, 16)
         }
     }
 }
 
-struct FavoriteGridItem: View {
-    let item: FavoriteItem
-    let client: JellyfinClient
-    let server: ServerConfig
-    @Binding var path: NavigationPath
-    @StateObject private var favorites = FavoritesManager.shared
-
-    private var isAlbum: Bool {
-        item.favoriteType == FavoriteType.album.rawValue
-    }
+struct InlineMiniPlayerView: View {
+    @StateObject private var player = PlayerManager.shared
 
     var body: some View {
-        let content = VStack(spacing: 8) {
-            artworkView()
-                .aspectRatio(1, contentMode: .fill)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-
-            VStack(spacing: 2) {
-                Text(item.name ?? "未知")
-                    .font(.system(size: 13, weight: .medium))
-                    .lineLimit(1)
-                    .foregroundStyle(.primary)
-
-                Text(item.displayArtist)
-                    .font(.system(size: 12))
-                    .lineLimit(1)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .contentShape(Rectangle())
-
-        if isAlbum {
-            NavigationLink {
-                AlbumTrackListView(server: server, albumId: item.itemId, title: item.name ?? "专辑", path: $path)
-            } label: {
-                content
-            }
-            .buttonStyle(.plain)
-        } else {
-            content
-                .onTapGesture {
-                    playTrack()
-                }
-        }
-    }
-
-    @ViewBuilder
-    private func artworkView() -> some View {
-        if let url = client.imageURL(itemId: item.itemId, maxWidth: 400) {
-            AsyncImage(url: url) { phase in
-                if let image = phase.image {
-                    image
+        HStack(spacing: 8) {
+            // 专辑封面
+            Group {
+                if let image = player.currentArtwork {
+                    Image(uiImage: image)
                         .resizable()
                         .aspectRatio(contentMode: .fill)
-                } else if phase.error != nil {
-                    placeholder()
-                } else {
-                    placeholder()
                 }
             }
-        } else {
-            placeholder()
-        }
-    }
+            .frame(width: 32, height: 32)
+            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
 
-    private func placeholder() -> some View {
-        RoundedRectangle(cornerRadius: 8, style: .continuous)
-            .fill(.gray.opacity(0.2))
-            .overlay(
-                Image(systemName: "music.note")
-                    .font(.system(size: 28))
-                    .foregroundStyle(.gray.opacity(0.5))
-            )
-    }
-
-    private func playTrack() {
-        let allFavorites = favorites.getFavorites(forServerId: server.id.uuidString)
-        guard let index = allFavorites.firstIndex(where: { $0.itemId == item.itemId }) else { return }
-
-        Task {
-            var baseItems: [BaseItemDto] = []
-            for fav in allFavorites {
-                do {
-                    let itemDto = try await client.getItem(itemId: fav.itemId)
-                    baseItems.append(itemDto)
-                } catch {
-                    print("[FavoriteGridItem] Error loading item: \(error)")
-                }
-            }
-            guard index < baseItems.count else { return }
-            PlayerManager.shared.play(queue: baseItems, index: index, server: server)
-        }
-    }
-}
-
-struct FavoriteListView: View {
-    let title: String
-    let items: [FavoriteItem]
-    let client: JellyfinClient
-    let server: ServerConfig
-    @Binding var path: NavigationPath
-
-    var body: some View {
-        ScrollView {
-            LazyVStack(spacing: 0) {
-                ForEach(Array(items.enumerated()), id: \.element.itemId) { index, item in
-                    FavoriteRow(item: item, client: client, server: server, path: $path)
-
-                    if index < items.count - 1 {
-                        Divider()
-                            .padding(.leading, 68)
-                    }
-                }
-            }
-            .padding(.vertical, 8)
-        }
-        .navigationTitle(title)
-    }
-}
-
-struct FavoriteRow: View {
-    let item: FavoriteItem
-    let client: JellyfinClient
-    let server: ServerConfig
-    @Binding var path: NavigationPath
-    @StateObject private var favorites = FavoritesManager.shared
-
-    private var isAlbum: Bool {
-        item.favoriteType == FavoriteType.album.rawValue
-    }
-
-    var body: some View {
-        let content = HStack(spacing: 12) {
-            artworkView()
-                .frame(width: 48, height: 48)
-                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(item.name ?? "未知")
-                    .font(.system(size: 16, weight: .medium))
+            // 歌曲信息
+            VStack(alignment: .leading, spacing: 1) {
+                Text(player.currentItem?.name ?? "Not Playing")
+                    .font(.caption.weight(.medium))
                     .lineLimit(1)
-
-                Text(item.displayArtist)
-                    .font(.system(size: 14))
+                Text(artistText())
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
 
             Spacer()
 
-            Button {
-                favorites.removeFavorite(itemId: item.itemId)
-            } label: {
-                Image(systemName: "heart.fill")
-                    .font(.system(size: 18))
-                    .foregroundStyle(.red)
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .contentShape(Rectangle())
-
-        if isAlbum {
-            NavigationLink {
-                AlbumTrackListView(server: server, albumId: item.itemId, title: item.name ?? "专辑", path: $path)
-            } label: {
-                content
-            }
-            .buttonStyle(.plain)
-        } else {
-            content
-                .onTapGesture {
-                    playTrack()
+            // 播放控制
+            HStack(spacing: 12) {
+                Button {
+                    player.togglePlayPause()
+                } label: {
+                    Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                        .font(.caption)
                 }
+
+                Button {
+                    player.nextTrack()
+                } label: {
+                    Image(systemName: "forward.fill")
+                        .font(.caption)
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 44)
+        .background(Color.clear)
+        .clipShape(Capsule())
+        .onTapGesture {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                player.showFullScreenPlayer = true
+            }
         }
     }
 
-    @ViewBuilder
-    private func artworkView() -> some View {
-        if let url = client.imageURL(itemId: item.itemId, maxWidth: 200) {
-            AsyncImage(url: url) { phase in
-                if let image = phase.image {
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                } else if phase.error != nil {
-                    placeholder()
-                } else {
-                    placeholder()
-                }
-            }
-        } else {
-            placeholder()
-        }
-    }
-
-    private func placeholder() -> some View {
-        RoundedRectangle(cornerRadius: 6, style: .continuous)
-            .fill(.gray.opacity(0.2))
-            .overlay(
-                Image(systemName: "music.note")
-                    .font(.system(size: 20))
-                    .foregroundStyle(.gray.opacity(0.5))
-            )
-    }
-
-    private func playTrack() {
-        let allFavorites = favorites.getFavorites(forServerId: server.id.uuidString)
-        guard let index = allFavorites.firstIndex(where: { $0.itemId == item.itemId }) else { return }
-
-        Task {
-            var baseItems: [BaseItemDto] = []
-            for fav in allFavorites {
-                do {
-                    let itemDto = try await client.getItem(itemId: fav.itemId)
-                    baseItems.append(itemDto)
-                } catch {
-                    print("[FavoriteRow] Error loading item: \(error)")
-                }
-            }
-            guard index < baseItems.count else { return }
-            PlayerManager.shared.play(queue: baseItems, index: index, server: server)
-        }
+    private func artistText() -> String {
+        guard let item = player.currentItem else { return "" }
+        return item.albumArtist ?? item.artists?.first ?? item.album ?? ""
     }
 }
 
-#Preview {
-    ContentView()
-        .modelContainer(for: [ServerConfig.self, FavoriteItem.self, DownloadItem.self], inMemory: true)
+struct ExpandedMiniPlayerView: View {
+    @StateObject private var player = PlayerManager.shared
+
+    var body: some View {
+        HStack(spacing: 12) {
+            // 专辑封面
+            Group {
+                if let image = player.currentArtwork {
+                    Image(uiImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                }
+            }
+            .frame(width: 40, height: 40)
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+
+            // 歌曲信息
+            VStack(alignment: .leading, spacing: 2) {
+                Text(player.currentItem?.name ?? "Not Playing")
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
+                Text(artistText())
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            // 播放控制
+            HStack(spacing: 16) {
+                Button {
+                    player.togglePlayPause()
+                } label: {
+                    Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                        .font(.title3)
+                }
+
+                Button {
+                    player.nextTrack()
+                } label: {
+                    Image(systemName: "forward.fill")
+                        .font(.body)
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .frame(height: 60)
+        .background(Color.clear)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(.horizontal, 16)
+        .onTapGesture {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                player.showFullScreenPlayer = true
+            }
+        }
+    }
+
+    private func artistText() -> String {
+        guard let item = player.currentItem else { return "" }
+        return item.albumArtist ?? item.artists?.first ?? item.album ?? ""
+    }
 }
