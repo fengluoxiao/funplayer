@@ -17,6 +17,7 @@ struct ContentView: View {
 
     @State private var showAddServer = false
     @State private var selectedTab = 0
+    @State private var searchText = ""
 
     var body: some View {
         ZStack {
@@ -127,12 +128,17 @@ struct ContentView: View {
 
                 Tab("搜索", systemImage: "magnifyingglass", value: 3, role: .search) {
                     NavigationStack {
-                        SearchTabView()
+                        SearchTabView(searchText: $searchText)
                     }
                 }
             }
             .toolbarColorScheme(.light, for: .tabBar)
             .tabBarMinimizeBehavior(.onScrollDown)
+            .searchable(
+                text: $searchText,
+                placement: .toolbar,
+                prompt: "艺人、歌曲、歌词以及更多内容"
+            )
             .popup(isBarPresented: Binding(
                 get: { player.currentItem != nil },
                 set: { _ in }
