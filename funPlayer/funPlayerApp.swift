@@ -13,6 +13,7 @@ struct funPlayerApp: App {
             ServerConfig.self,
             FavoriteItem.self,
             DownloadItem.self,
+            SearchHistoryItem.self,
         ])
         let modelConfiguration = ModelConfiguration(
             schema: schema,

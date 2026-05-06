@@ -12,6 +12,7 @@ final class AppState: ObservableObject {
     static let shared = AppState()
 
     var selectedServer: ServerConfig?
+    var modelContext: ModelContext?
 
     var selectedLibraryIds: [String] {
         selectedServer?.selectedLibraryIds ?? []

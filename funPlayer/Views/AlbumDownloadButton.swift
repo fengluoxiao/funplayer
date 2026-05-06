@@ -44,7 +44,7 @@ struct AlbumDownloadButton: View {
 
     private func handleTap() {
         if isDownloading {
-            downloadManager.cancelDownload(itemId: item.id)
+            downloadManager.cancelDownload(itemId: item.id, serverId: serverId)
             ToastManager.shared.show("已取消下载")
         } else if isDownloaded {
             // 如果正在播放该专辑的歌曲，先停止播放

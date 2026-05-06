@@ -527,26 +527,26 @@ class DownloadManager: ObservableObject {
         return fileManager.fileExists(atPath: url.path) ? url : nil
     }
 
-    func cancelDownload(itemId: String) {
+    func cancelDownload(itemId: String, serverId: String) {
         // 先尝试直接取消
         activeDownloads[itemId]?.cancel()
         activeDownloads.removeValue(forKey: itemId)
 
         // 如果是单曲，尝试通过 albumId 取消专辑的 dummyTask
-        if let item = getAllDownloads().first(where: { $0.itemId == itemId }),
+        if let item = getDownloadItem(itemId: itemId, serverId: serverId),
            let albumId = item.albumId {
             activeDownloads[albumId]?.cancel()
             activeDownloads.removeValue(forKey: albumId)
         }
 
-        if let item = getAllDownloads().first(where: { $0.itemId == itemId }) {
+        if let item = getDownloadItem(itemId: itemId, serverId: serverId) {
             item.downloadStatus = .cancelled
             try? modelContext?.save()
         }
     }
 
     func deleteDownload(itemId: String, serverId: String) {
-        cancelDownload(itemId: itemId)
+        cancelDownload(itemId: itemId, serverId: serverId)
 
         if let item = getDownloadItem(itemId: itemId, serverId: serverId) {
             if let path = item.localFilePath {

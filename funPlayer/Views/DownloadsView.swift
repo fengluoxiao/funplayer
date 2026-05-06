@@ -132,7 +132,7 @@ struct DownloadRow: View {
             Spacer()
 
             Button {
-                downloadManager.cancelDownload(itemId: item.itemId)
+                downloadManager.cancelDownload(itemId: item.itemId, serverId: item.serverId)
             } label: {
                 Image(systemName: "xmark.circle.fill")
                     .foregroundStyle(.red)

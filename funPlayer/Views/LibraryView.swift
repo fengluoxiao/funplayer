@@ -208,7 +208,7 @@ struct MediaRow: View {
                 let isDownloading = downloadManager.isDownloading(itemId: item.id)
                 if isDownloading {
                     Button {
-                        downloadManager.cancelDownload(itemId: item.id)
+                        downloadManager.cancelDownload(itemId: item.id, serverId: server.id.uuidString)
                         ToastManager.shared.show("已取消下载")
                     } label: {
                         Label("取消下载", systemImage: "xmark.circle")
@@ -1096,7 +1096,7 @@ struct TrackRow: View {
                 systemImage: "xmark.circle.fill",
                 isDestructive: false
             ) {
-                downloadManager.cancelDownload(itemId: item.id)
+                downloadManager.cancelDownload(itemId: item.id, serverId: server.id.uuidString)
                 ToastManager.shared.show("已取消下载")
             })
         } else if isDownloaded {

@@ -34,6 +34,7 @@ struct ContentView: View {
             ServerSetupView(showAddServer: $showAddServer)
         }
         .onAppear {
+            appState.modelContext = modelContext
             FavoritesManager.shared.setup(with: modelContext)
             DownloadManager.shared.setup(with: modelContext)
             initializeSelectedServer()
@@ -129,16 +130,16 @@ struct ContentView: View {
                 Tab("搜索", systemImage: "magnifyingglass", value: 3, role: .search) {
                     NavigationStack {
                         SearchTabView(searchText: $searchText)
+                            .searchable(
+                                text: $searchText,
+                                placement: .toolbar,
+                                prompt: "艺人、歌曲、歌词以及更多内容"
+                            )
                     }
                 }
             }
             .toolbarColorScheme(.light, for: .tabBar)
             .tabBarMinimizeBehavior(.onScrollDown)
-            .searchable(
-                text: $searchText,
-                placement: .toolbar,
-                prompt: "艺人、歌曲、歌词以及更多内容"
-            )
             .popup(isBarPresented: Binding(
                 get: { player.currentItem != nil },
                 set: { _ in }
@@ -1024,7 +1025,7 @@ struct LibraryAlbumCard: View {
 
                 if isDownloading {
                     Button {
-                        downloadManager.cancelDownload(itemId: item.id)
+                        downloadManager.cancelDownload(itemId: item.id, serverId: server.id.uuidString)
                     } label: {
                         Label("取消下载", systemImage: "xmark.circle")
                     }
@@ -1357,12 +1358,6 @@ struct SettingsTabView: View {
             }
             Task {
                 await loadLibraries()
-            }
-        }
-        .onAppear {
-            if let server = appState.selectedServer {
-                showDownloadedOnly = server.showDownloadedOnly
-                allowDirectPlay = server.enableDirectPlay
             }
         }
     }

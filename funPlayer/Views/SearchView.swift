@@ -4,37 +4,113 @@
 //
 
 import SwiftUI
+import SwiftData
+import Combine
 
 class SearchHistoryManager {
     static let shared = SearchHistoryManager()
-    
-    private let historyKey = "SearchHistory"
     private let maxHistoryCount = 10
-    
+    private var cachedHistory: [String]?
+    private var lastServerId: String?
+
     private init() {}
-    
+
+    private var modelContext: ModelContext? {
+        AppState.shared.modelContext
+    }
+
+    private var currentServerId: String? {
+        AppState.shared.selectedServer?.id.uuidString
+    }
+
     func getHistory() -> [String] {
-        UserDefaults.standard.stringArray(forKey: historyKey) ?? []
-    }
-    
-    func addToHistory(_ query: String) {
-        var history = getHistory()
-        history.removeAll { $0.lowercased() == query.lowercased() }
-        history.insert(query, at: 0)
-        if history.count > maxHistoryCount {
-            history = Array(history.prefix(maxHistoryCount))
+        let serverId = currentServerId
+        if let cached = cachedHistory, lastServerId == serverId {
+            return cached
         }
-        UserDefaults.standard.set(history, forKey: historyKey)
+        lastServerId = serverId
+
+        guard let context = modelContext, let serverId = serverId else { return [] }
+        let descriptor = FetchDescriptor<SearchHistoryItem>(
+            predicate: #Predicate { $0.serverId == serverId },
+            sortBy: [SortDescriptor(\.dateAdded, order: .reverse)]
+        )
+        do {
+            let items = try context.fetch(descriptor)
+            let queries = items.map { $0.query }
+            cachedHistory = queries
+            return queries
+        } catch {
+            print("[SearchHistoryManager] Error fetching history: \(error)")
+            return []
+        }
     }
-    
+
+    func addToHistory(_ query: String) {
+        guard let context = modelContext, let serverId = currentServerId else { return }
+
+        let descriptor = FetchDescriptor<SearchHistoryItem>(
+            predicate: #Predicate { $0.query == query && $0.serverId == serverId }
+        )
+        do {
+            let existing = try context.fetch(descriptor)
+            for item in existing {
+                context.delete(item)
+            }
+
+            let newItem = SearchHistoryItem(query: query, serverId: serverId)
+            context.insert(newItem)
+
+            let allDescriptor = FetchDescriptor<SearchHistoryItem>(
+                predicate: #Predicate { $0.serverId == serverId },
+                sortBy: [SortDescriptor(\.dateAdded, order: .reverse)]
+            )
+            let allItems = try context.fetch(allDescriptor)
+            if allItems.count > maxHistoryCount {
+                for item in allItems[maxHistoryCount...] {
+                    context.delete(item)
+                }
+            }
+
+            try context.save()
+            cachedHistory = nil
+        } catch {
+            print("[SearchHistoryManager] Error adding history: \(error)")
+        }
+    }
+
     func removeFromHistory(_ query: String) {
-        var history = getHistory()
-        history.removeAll { $0 == query }
-        UserDefaults.standard.set(history, forKey: historyKey)
+        guard let context = modelContext, let serverId = currentServerId else { return }
+        let descriptor = FetchDescriptor<SearchHistoryItem>(
+            predicate: #Predicate { $0.query == query && $0.serverId == serverId }
+        )
+        do {
+            let items = try context.fetch(descriptor)
+            for item in items {
+                context.delete(item)
+            }
+            try context.save()
+            cachedHistory = nil
+        } catch {
+            print("[SearchHistoryManager] Error removing history: \(error)")
+        }
     }
-    
+
     func clearHistory() {
-        UserDefaults.standard.removeObject(forKey: historyKey)
+        guard let context = modelContext, let serverId = currentServerId else { return }
+        let descriptor = FetchDescriptor<SearchHistoryItem>(
+            predicate: #Predicate { $0.serverId == serverId }
+        )
+        do {
+            let items = try context.fetch(descriptor)
+            for item in items {
+                context.delete(item)
+            }
+            try context.save()
+            cachedHistory = nil
+        } catch {
+            print("[SearchHistoryManager] Error clearing history: \(error)")
+        }
     }
 }
 
@@ -43,19 +119,15 @@ enum SearchCategory: String, CaseIterable, Identifiable {
     case songs = "歌曲"
     case albums = "专辑"
     case artists = "艺人"
-    case movies = "电影"
-    case shows = "剧集"
-    
+
     var id: String { rawValue }
-    
+
     var itemTypes: [String] {
         switch self {
-        case .all: return ["Audio", "MusicAlbum", "MusicArtist", "Movie", "Series", "Episode"]
+        case .all: return ["Audio", "MusicAlbum", "MusicArtist"]
         case .songs: return ["Audio"]
         case .albums: return ["MusicAlbum"]
         case .artists: return ["MusicArtist"]
-        case .movies: return ["Movie"]
-        case .shows: return ["Series", "Episode"]
         }
     }
 }
@@ -65,27 +137,25 @@ struct SearchTabView: View {
     @State private var searchResults: [BaseItemDto] = []
     @State private var isLoading = false
     @State private var selectedCategory: SearchCategory = .all
-    
+    @State private var selectedAlbumId: String?
+    @State private var searchHistoryCache: [String] = []
+
     @StateObject private var appState = AppState.shared
     @StateObject private var client = JellyfinClient()
     @StateObject private var player = PlayerManager.shared
-    
-    private var searchHistory: [String] {
-        SearchHistoryManager.shared.getHistory()
+    @StateObject private var downloadManager = DownloadManager.shared
+
+    private var isOfflineMode: Bool {
+        appState.selectedServer?.showDownloadedOnly ?? false
     }
-    
-    private var filteredResults: [BaseItemDto] {
-        if selectedCategory == .all {
-            return searchResults
-        }
-        return searchResults.filter { selectedCategory.itemTypes.contains($0.type ?? "") }
-    }
-    
+
+    private let searchSubject = PassthroughSubject<String, Never>()
+
     var body: some View {
         ZStack {
             Color(.systemBackground)
                 .edgesIgnoringSafeArea(.all)
-            
+
             VStack(spacing: 0) {
                 if searchText.isEmpty {
                     historyView
@@ -94,13 +164,14 @@ struct SearchTabView: View {
                 }
             }
         }
-        .navigationTitle("搜索")
         .background(Color(.systemBackground))
+        .onAppear {
+            searchHistoryCache = SearchHistoryManager.shared.getHistory()
+            setupSearchDebounce()
+        }
         .onChange(of: searchText) { _, newValue in
             if !newValue.isEmpty {
-                Task {
-                    await performSearch(query: newValue)
-                }
+                searchSubject.send(newValue)
             } else {
                 searchResults = []
             }
@@ -108,50 +179,116 @@ struct SearchTabView: View {
         .onSubmit(of: .search) {
             if !searchText.isEmpty {
                 SearchHistoryManager.shared.addToHistory(searchText)
+                searchHistoryCache = SearchHistoryManager.shared.getHistory()
+            }
+        }
+        .navigationDestination(item: $selectedAlbumId) { albumId in
+            if let server = appState.selectedServer {
+                AlbumTrackListView(
+                    server: server,
+                    albumId: albumId,
+                    title: searchResults.first(where: { $0.id == albumId })?.name ?? "专辑",
+                    path: .constant(NavigationPath())
+                )
             }
         }
     }
-    
-    private func performSearch(query: String) async {
-        guard let server = appState.selectedServer, server.isAuthenticated else { return }
-        
-        client.serverConfig = server
-        isLoading = true
-        
-        do {
-            let libraryIds = appState.selectedLibraryIds
-            if libraryIds.isEmpty {
-                searchResults = try await client.search(query: query)
-            } else {
-                var allResults: [BaseItemDto] = []
-                for libraryId in libraryIds {
-                    let results = try await client.search(query: query, parentId: libraryId)
-                    allResults.append(contentsOf: results)
+
+    private func setupSearchDebounce() {
+        searchSubject
+            .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main)
+            .removeDuplicates()
+            .sink { query in
+                Task {
+                    await performSearch(query: query)
                 }
-                searchResults = Array(Set(allResults)).sorted { ($0.name ?? "") < ($1.name ?? "") }
             }
-        } catch {
-            print("[SearchView] Error searching: \(error)")
-            searchResults = []
+    }
+
+    private func performSearch(query: String) async {
+        guard let server = appState.selectedServer else { return }
+
+        isLoading = true
+
+        if isOfflineMode {
+            searchResults = performLocalSearch(query: query, serverId: server.id.uuidString)
+        } else {
+            guard server.isAuthenticated else {
+                isLoading = false
+                return
+            }
+            client.serverConfig = server
+            do {
+                let libraryIds = appState.selectedLibraryIds
+                if libraryIds.isEmpty {
+                    searchResults = try await client.search(query: query)
+                } else {
+                    var allResults: [BaseItemDto] = []
+                    for libraryId in libraryIds {
+                        let results = try await client.search(query: query, parentId: libraryId)
+                        allResults.append(contentsOf: results)
+                    }
+                    searchResults = Array(Set(allResults)).sorted { ($0.name ?? "") < ($1.name ?? "") }
+                }
+            } catch {
+                print("[SearchView] Error searching: \(error)")
+                searchResults = []
+            }
         }
-        
+
         isLoading = false
     }
-    
+
+    private func performLocalSearch(query: String, serverId: String) -> [BaseItemDto] {
+        let downloadedItems = downloadManager.getDownloadedItems(forServerId: serverId)
+        let lowerQuery = query.lowercased()
+
+        let matched = downloadedItems.filter { item in
+            let nameMatch = item.name.lowercased().contains(lowerQuery)
+            let artistMatch = item.artist?.lowercased().contains(lowerQuery) ?? false
+            let albumMatch = item.albumName?.lowercased().contains(lowerQuery) ?? false
+            return nameMatch || artistMatch || albumMatch
+        }
+
+        return matched.map { item in
+            BaseItemDto(
+                id: item.itemId,
+                name: item.name,
+                type: item.type,
+                overview: nil,
+                indexNumber: item.indexNumber,
+                parentIndexNumber: nil,
+                seriesName: nil,
+                album: item.albumName,
+                albumId: item.albumId,
+                albumArtist: item.artist,
+                artists: item.artist != nil ? [item.artist!] : nil,
+                runTimeTicks: nil,
+                userData: nil,
+                primaryImageAspectRatio: nil,
+                imageTags: nil,
+                backdropImageTags: nil,
+                mediaType: nil,
+                collectionType: nil
+            )
+        }.sorted { ($0.name ?? "") < ($1.name ?? "") }
+    }
+
     private var historyView: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 28) {
-                if !searchHistory.isEmpty {
+                if !searchHistoryCache.isEmpty {
                     VStack(alignment: .leading, spacing: 16) {
                         HStack {
                             Text("最近搜索")
                                 .font(.system(size: 22, weight: .bold))
-                            
+
                             Spacer()
-                            
+
                             Button {
                                 withAnimation(.easeInOut(duration: 0.25)) {
                                     SearchHistoryManager.shared.clearHistory()
+                                    searchHistoryCache = []
                                 }
                             } label: {
                                 Text("清除")
@@ -160,9 +297,9 @@ struct SearchTabView: View {
                             }
                         }
                         .padding(.horizontal, 16)
-                        
+
                         VStack(spacing: 0) {
-                            ForEach(Array(searchHistory.enumerated()), id: \.element) { index, query in
+                            ForEach(Array(searchHistoryCache.enumerated()), id: \.element) { index, query in
                                 Button {
                                     withAnimation(.easeInOut(duration: 0.2)) {
                                         searchText = query
@@ -173,16 +310,17 @@ struct SearchTabView: View {
                                             .font(.system(size: 16))
                                             .foregroundStyle(.secondary)
                                             .frame(width: 24)
-                                        
+
                                         Text(query)
                                             .font(.system(size: 16, weight: .medium))
                                             .foregroundStyle(.primary)
-                                        
+
                                         Spacer()
-                                        
+
                                         Button {
                                             withAnimation(.easeInOut(duration: 0.2)) {
                                                 SearchHistoryManager.shared.removeFromHistory(query)
+                                                searchHistoryCache = SearchHistoryManager.shared.getHistory()
                                             }
                                         } label: {
                                             Image(systemName: "xmark")
@@ -203,8 +341,8 @@ struct SearchTabView: View {
                                     )
                                 }
                                 .buttonStyle(.plain)
-                                
-                                if index < searchHistory.count - 1 {
+
+                                if index < searchHistoryCache.count - 1 {
                                     Divider()
                                         .padding(.leading, 54)
                                         .padding(.trailing, 16)
@@ -214,25 +352,25 @@ struct SearchTabView: View {
                         .padding(.horizontal, 16)
                     }
                 }
-                
+
                 VStack(alignment: .leading, spacing: 16) {
-                    Text("热门搜索")
+                    Text("搜索记录")
                         .font(.system(size: 22, weight: .bold))
                         .padding(.horizontal, 16)
-                    
-                    let hotSearches = ["华语流行", "欧美金曲", "经典老歌", "影视原声", "轻音乐", "摇滚", "爵士", "电子"]
-                    
+
+                    let searchRecords = ["华语流行", "欧美金曲", "经典老歌", "影视原声", "轻音乐", "摇滚", "爵士", "电子"]
+
                     FlowLayout(spacing: 12) {
-                        ForEach(hotSearches, id: \.self) { tag in
+                        ForEach(searchRecords, id: \.self) { tag in
                             Button {
                                 withAnimation(.easeInOut(duration: 0.2)) {
                                     searchText = tag
                                 }
                             } label: {
                                 HStack(spacing: 6) {
-                                    Image(systemName: "flame.fill")
+                                    Image(systemName: "magnifyingglass")
                                         .font(.system(size: 12))
-                                        .foregroundStyle(.orange)
+                                        .foregroundStyle(.secondary)
                                     Text(tag)
                                         .font(.system(size: 15, weight: .medium))
                                 }
@@ -254,12 +392,31 @@ struct SearchTabView: View {
             .padding(.bottom, 40)
         }
     }
-    
+
+    private var filteredResults: [BaseItemDto] {
+        if selectedCategory == .all {
+            return searchResults
+        }
+        return searchResults.filter { selectedCategory.itemTypes.contains($0.type ?? "") }
+    }
+
     private var resultsView: some View {
         VStack(spacing: 0) {
+            HStack {
+                Text("搜索结果")
+                    .font(.system(size: 28, weight: .bold))
+                    .padding(.horizontal, 16)
+                Spacer()
+            }
+            .padding(.top, 8)
+            .padding(.bottom, 4)
+
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    ForEach(SearchCategory.allCases) { category in
+                    let categories = isOfflineMode
+                        ? [SearchCategory.all, .songs, .albums]
+                        : SearchCategory.allCases
+                    ForEach(categories) { category in
                         Button {
                             withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                                 selectedCategory = category
@@ -281,7 +438,7 @@ struct SearchTabView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
             }
-            
+
             if isLoading {
                 Spacer()
                 ProgressView()
@@ -293,11 +450,11 @@ struct SearchTabView: View {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 48, weight: .light))
                         .foregroundStyle(.secondary.opacity(0.6))
-                    
+
                     Text("未找到结果")
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundStyle(.primary)
-                    
+
                     Text("尝试其他关键词")
                         .font(.system(size: 15))
                         .foregroundStyle(.secondary)
@@ -308,9 +465,16 @@ struct SearchTabView: View {
                 ScrollView(showsIndicators: false) {
                     LazyVStack(spacing: 0) {
                         ForEach(Array(filteredResults.enumerated()), id: \.element.id) { index, item in
-                            SearchResultRow(item: item, client: client, server: appState.selectedServer)
-                                .padding(.horizontal, 16)
-                            
+                            SearchResultRow(
+                                item: item,
+                                client: client,
+                                server: appState.selectedServer,
+                                onSelectAlbum: { albumId in
+                                    selectedAlbumId = albumId
+                                }
+                            )
+                            .padding(.horizontal, 16)
+
                             if index < filteredResults.count - 1 {
                                 Divider()
                                     .padding(.leading, 84)
@@ -330,13 +494,13 @@ struct SearchResultRow: View {
     let item: BaseItemDto
     let client: JellyfinClient
     let server: ServerConfig?
+    var onSelectAlbum: ((String) -> Void)?
     @StateObject private var player = PlayerManager.shared
     @State private var localArtwork: UIImage?
-    @State private var isPressed = false
-    
+
     var body: some View {
         Button {
-            playItem()
+            handleTap()
         } label: {
             HStack(spacing: 14) {
                 Group {
@@ -345,17 +509,7 @@ struct SearchResultRow: View {
                             .resizable()
                             .aspectRatio(contentMode: .fill)
                     } else {
-                        AsyncImage(url: client.imageURL(itemId: item.id, maxWidth: 200)) { phase in
-                            if let image = phase.image {
-                                image
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fill)
-                            } else if phase.error != nil {
-                                placeholderView
-                            } else {
-                                Color.gray.opacity(0.12)
-                            }
-                        }
+                        CachedAsyncImage(url: client.imageURL(itemId: item.id, maxWidth: 200))
                     }
                 }
                 .frame(width: 60, height: 60)
@@ -367,25 +521,25 @@ struct SearchResultRow: View {
                 .onAppear {
                     loadLocalArtwork()
                 }
-                
+
                 VStack(alignment: .leading, spacing: 4) {
                     Text(item.name ?? "Unknown")
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundColor(.primary)
                         .lineLimit(1)
-                    
+
                     HStack(spacing: 6) {
                         typeBadge
-                        
+
                         Text(subtitleText)
                             .font(.system(size: 14))
                             .foregroundColor(.secondary)
                             .lineLimit(1)
                     }
                 }
-                
+
                 Spacer()
-                
+
                 Image(systemName: "chevron.right")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.gray.opacity(0.35))
@@ -395,7 +549,7 @@ struct SearchResultRow: View {
         }
         .buttonStyle(SearchResultButtonStyle())
     }
-    
+
     @ViewBuilder
     private var typeBadge: some View {
         let (text, color) = typeInfo
@@ -407,7 +561,7 @@ struct SearchResultRow: View {
             .foregroundStyle(color)
             .clipShape(Capsule())
     }
-    
+
     private var typeInfo: (String, Color) {
         switch item.type {
         case "Audio": return ("歌曲", .pink)
@@ -418,27 +572,7 @@ struct SearchResultRow: View {
         default: return ("", .gray)
         }
     }
-    
-    private var placeholderView: some View {
-        Color.gray.opacity(0.15)
-            .overlay(
-                Image(systemName: typeIcon)
-                    .font(.system(size: 22))
-                    .foregroundStyle(.gray.opacity(0.4))
-            )
-    }
-    
-    private var typeIcon: String {
-        switch item.type {
-        case "Audio": return "music.note"
-        case "MusicAlbum": return "square.stack"
-        case "MusicArtist": return "music.mic"
-        case "Movie": return "film"
-        case "Series", "Episode": return "tv"
-        default: return "questionmark"
-        }
-    }
-    
+
     private var subtitleText: String {
         switch item.type {
         case "Audio":
@@ -457,26 +591,20 @@ struct SearchResultRow: View {
             return item.type ?? ""
         }
     }
-    
-    private func playItem() {
-        guard let server = server else { return }
-        
+
+    private func handleTap() {
         switch item.type {
         case "MusicAlbum":
-            Task {
-                do {
-                    let tracks = try await client.getItems(
-                        parentId: item.id,
-                        includeItemTypes: "Audio",
-                        sortBy: "ParentIndexNumber,IndexNumber"
-                    )
-                    if let first = tracks.first, let index = tracks.firstIndex(where: { $0.id == first.id }) {
-                        player.play(queue: tracks, index: index, server: server)
-                    }
-                } catch {
-                    print("[SearchResultRow] Error loading album tracks: \(error)")
-                }
-            }
+            onSelectAlbum?(item.id)
+        default:
+            playItem()
+        }
+    }
+
+    private func playItem() {
+        guard let server = server else { return }
+
+        switch item.type {
         case "MusicArtist":
             Task {
                 do {
@@ -504,11 +632,55 @@ struct SearchResultRow: View {
             player.playSingle(item: item, server: server)
         }
     }
-    
+
     private func loadLocalArtwork() {
         if let url = DownloadManager.shared.getLocalArtworkURL(itemId: item.id) {
             if let data = try? Data(contentsOf: url) {
                 localArtwork = UIImage(data: data)
+            }
+        }
+    }
+}
+
+struct CachedAsyncImage: View {
+    let url: URL?
+    @State private var image: UIImage?
+    private static var cache = NSCache<NSURL, UIImage>()
+
+    var body: some View {
+        Group {
+            if let image = image {
+                Image(uiImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            } else {
+                Color.gray.opacity(0.12)
+                    .onAppear {
+                        loadImage()
+                    }
+            }
+        }
+    }
+
+    private func loadImage() {
+        guard let url = url else { return }
+
+        if let cached = Self.cache.object(forKey: url as NSURL) {
+            image = cached
+            return
+        }
+
+        Task {
+            do {
+                let (data, _) = try await URLSession.shared.data(from: url)
+                if let loadedImage = UIImage(data: data) {
+                    Self.cache.setObject(loadedImage, forKey: url as NSURL)
+                    await MainActor.run {
+                        image = loadedImage
+                    }
+                }
+            } catch {
+                print("[CachedAsyncImage] Error loading image: \(error)")
             }
         }
     }
@@ -528,12 +700,12 @@ struct SearchResultButtonStyle: ButtonStyle {
 
 struct FlowLayout: Layout {
     var spacing: CGFloat = 8
-    
+
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let result = FlowResult(in: proposal.width ?? 0, subviews: subviews, spacing: spacing)
         return result.size
     }
-    
+
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         let result = FlowResult(in: bounds.width, subviews: subviews, spacing: spacing)
         for (index, subview) in subviews.enumerated() {
@@ -542,16 +714,16 @@ struct FlowLayout: Layout {
                          proposal: .unspecified)
         }
     }
-    
+
     struct FlowResult {
         var size: CGSize = .zero
         var positions: [CGPoint] = []
-        
+
         init(in maxWidth: CGFloat, subviews: Subviews, spacing: CGFloat) {
             var x: CGFloat = 0
             var y: CGFloat = 0
             var rowHeight: CGFloat = 0
-            
+
             for subview in subviews {
                 let size = subview.sizeThatFits(.unspecified)
                 if x + size.width > maxWidth && x > 0 {
@@ -563,7 +735,7 @@ struct FlowLayout: Layout {
                 rowHeight = max(rowHeight, size.height)
                 x += size.width + spacing
             }
-            
+
             self.size = CGSize(width: maxWidth, height: y + rowHeight)
         }
     }
