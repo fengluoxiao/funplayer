@@ -14,11 +14,11 @@ struct ContentView: View {
     @Query(sort: \ServerConfig.dateAdded) private var servers: [ServerConfig]
     @StateObject private var player = PlayerManager.shared
     @StateObject private var appState = AppState.shared
+    @StateObject private var memoryManager = PlaybackMemoryManager.shared
 
     @State private var showAddServer = false
     @State private var selectedTab = 0
     @State private var searchText = ""
-
     var body: some View {
         ZStack {
             Group {
@@ -40,15 +40,24 @@ struct ContentView: View {
             appState.modelContext = modelContext
             FavoritesManager.shared.setup(with: modelContext)
             DownloadManager.shared.setup(with: modelContext)
+            PlaybackMemoryManager.shared.setup(with: modelContext)
             initializeSelectedServer()
             preloadCurrentArtwork()
             Task {
                 await autoSwitchServersOnLaunch()
+                await autoRestorePlayback()
             }
         }
         .onChange(of: servers) {
             initializeSelectedServer()
         }
+    }
+
+    private func autoRestorePlayback() async {
+        guard PlaybackMemoryManager.shared.shouldAutoRestore else { return }
+        guard player.currentItem == nil else { return }
+
+        _ = await PlaybackMemoryManager.shared.restoreLastSession()
     }
 
     private func autoSwitchServersOnLaunch() async {
@@ -85,6 +94,9 @@ struct ContentView: View {
             } else if let first = servers.first {
                 appState.selectServer(first)
             }
+        }
+        if let server = appState.selectedServer {
+            try? modelContext.save()
         }
     }
 
@@ -217,9 +229,7 @@ struct HomeTabView: View {
     @State private var isLoading = true
     @State private var path = NavigationPath()
 
-    private var showDownloadedOnly: Bool {
-        appState.selectedServer?.showDownloadedOnly ?? false
-    }
+    @AppStorage("showDownloadedOnly") private var showDownloadedOnly = false
 
     private var filteredRecentlyPlayed: [BaseItemDto] {
         guard showDownloadedOnly, let server = appState.selectedServer else { return recentlyPlayed }
@@ -341,7 +351,8 @@ struct HomeTabView: View {
 
         client.serverConfig = server
 
-        if server.showDownloadedOnly {
+        let showDownloadedOnly = UserDefaults.standard.bool(forKey: "showDownloadedOnly")
+        if showDownloadedOnly {
             isLoading = true
             let downloadedItems = downloadManager.getDownloadedItems(forServerId: server.id.uuidString)
             var items: [BaseItemDto] = []
@@ -522,10 +533,9 @@ struct LibraryTabView: View {
     @State private var songs: [BaseItemDto] = []
     @State private var isLoading = true
     @State private var path = NavigationPath()
+    @State private var selectedAlbumId: String?
 
-    private var showDownloadedOnly: Bool {
-        appState.selectedServer?.showDownloadedOnly ?? false
-    }
+    @AppStorage("showDownloadedOnly") private var showDownloadedOnly = false
 
     private var downloadedItemIds: Set<String> {
         guard let server = appState.selectedServer else { return [] }
@@ -582,6 +592,16 @@ struct LibraryTabView: View {
                     items: itemsForCategory(category),
                     path: $path
                 )
+            }
+            .navigationDestination(item: $selectedAlbumId) { albumId in
+                if let server = appState.selectedServer {
+                    AlbumTrackListView(
+                        server: server,
+                        albumId: albumId,
+                        title: albums.first(where: { $0.id == albumId })?.name ?? "专辑",
+                        path: $path
+                    )
+                }
             }
             .task {
                 await loadLibraryData()
@@ -649,7 +669,13 @@ struct LibraryTabView: View {
                             ScrollView(.vertical, showsIndicators: false) {
                                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 16), GridItem(.flexible(), spacing: 16)], spacing: 16) {
                                     ForEach(filteredAlbums.prefix(10)) { item in
-                                        LibraryAlbumCard(item: item, client: client)
+                                        LibraryAlbumCard(
+                                            item: item,
+                                            client: client,
+                                            onSelectAlbum: { albumId in
+                                                selectedAlbumId = albumId
+                                            }
+                                        )
                                     }
                                 }
                                 .padding(.horizontal, 16)
@@ -698,7 +724,8 @@ struct LibraryTabView: View {
 
         client.serverConfig = server
 
-        if server.showDownloadedOnly {
+        let showDownloadedOnly = UserDefaults.standard.bool(forKey: "showDownloadedOnly")
+        if showDownloadedOnly {
             isLoading = true
             let downloadedItems = downloadManager.getDownloadedItems(forServerId: server.id.uuidString)
             var allAlbums: [BaseItemDto] = []
@@ -922,10 +949,11 @@ struct LibraryAlbumCard: View {
     @StateObject private var player = PlayerManager.shared
     @StateObject private var downloadManager = DownloadManager.shared
     @State private var localArtwork: UIImage?
+    var onSelectAlbum: ((String) -> Void)?
 
     var body: some View {
         Button {
-            playItem()
+            handleTap()
         } label: {
             VStack(alignment: .leading, spacing: 6) {
                 Group {
@@ -953,10 +981,21 @@ struct LibraryAlbumCard: View {
                     loadLocalArtwork()
                 }
 
-                Text(item.name ?? "Unknown")
-                    .font(.subheadline.weight(.medium))
-                    .lineLimit(1)
-                    .frame(width: 160, alignment: .leading)
+                HStack(spacing: 6) {
+                    Text(item.name ?? "Unknown")
+                        .font(.subheadline.weight(.medium))
+                        .lineLimit(1)
+
+                    let (badgeText, badgeColor) = typeBadgeInfo
+                    Text(badgeText)
+                        .font(.system(size: 9, weight: .bold))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(badgeColor.opacity(0.15))
+                        .foregroundStyle(badgeColor)
+                        .clipShape(Capsule())
+                }
+                .frame(width: 160, alignment: .leading)
 
                 if let artist = item.albumArtist ?? item.artists?.first ?? item.seriesName {
                     Text(artist)
@@ -999,6 +1038,26 @@ struct LibraryAlbumCard: View {
                     }
                 }
             }
+        }
+    }
+
+    private var typeBadgeInfo: (String, Color) {
+        switch item.type {
+        case "Audio": return ("歌曲", .pink)
+        case "MusicAlbum": return ("专辑", .purple)
+        case "MusicArtist": return ("艺人", .blue)
+        case "Movie": return ("电影", .orange)
+        case "Series", "Episode": return ("剧集", .green)
+        default: return ("", .gray)
+        }
+    }
+
+    private func handleTap() {
+        switch item.type {
+        case "MusicAlbum":
+            onSelectAlbum?(item.id)
+        default:
+            playItem()
         }
     }
 
@@ -1247,8 +1306,8 @@ struct SettingsTabView: View {
     @State private var speedTestServer: ServerConfig?
     @State private var showDirectPlayAlert = false
     @State private var path = NavigationPath()
-    @State private var showDownloadedOnly = false
-    @State private var allowDirectPlay = false
+    @AppStorage("showDownloadedOnly") private var showDownloadedOnly = false
+    @AppStorage("allowDirectPlay") private var allowDirectPlay = false
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -1288,8 +1347,7 @@ struct SettingsTabView: View {
                     showDownloadedOnly: $showDownloadedOnly,
                     allowDirectPlay: $allowDirectPlay,
                     showDirectPlayAlert: $showDirectPlayAlert,
-                    speedTestServer: $speedTestServer,
-                    modelContext: modelContext
+                    speedTestServer: $speedTestServer
                 )
             }
 
@@ -1308,10 +1366,6 @@ struct SettingsTabView: View {
             await loadLibraries()
         }
         .onChange(of: appState.selectedServer) {
-            if let server = appState.selectedServer {
-                showDownloadedOnly = server.showDownloadedOnly
-                allowDirectPlay = server.enableDirectPlay
-            }
             Task {
                 await loadLibraries()
             }
@@ -1473,7 +1527,7 @@ struct PlaybackSettingsSection: View {
     @Binding var allowDirectPlay: Bool
     @Binding var showDirectPlayAlert: Bool
     @Binding var speedTestServer: ServerConfig?
-    var modelContext: ModelContext
+    @AppStorage("playback_auto_restore") private var autoRestorePlayback = true
 
     var body: some View {
         Section(String(localized: "播放设置")) {
@@ -1483,10 +1537,6 @@ struct PlaybackSettingsSection: View {
                     Text("离线模式")
                 }
             }
-            .onChange(of: showDownloadedOnly) {
-                server.showDownloadedOnly = showDownloadedOnly
-                try? modelContext.save()
-            }
 
             Toggle(isOn: $allowDirectPlay) {
                 HStack {
@@ -1495,8 +1545,6 @@ struct PlaybackSettingsSection: View {
                 }
             }
             .onChange(of: allowDirectPlay) {
-                server.enableDirectPlay = allowDirectPlay
-                try? modelContext.save()
                 if allowDirectPlay {
                     showDirectPlayAlert = true
                 }
@@ -1505,6 +1553,13 @@ struct PlaybackSettingsSection: View {
                 Button("确定", role: .cancel) {}
             } message: {
                 Text("直接播放可能在网络不稳定时导致播放卡顿，建议在局域网环境下使用。")
+            }
+
+            Toggle(isOn: $autoRestorePlayback) {
+                HStack {
+                    Image(systemName: "clock.arrow.circlepath")
+                    Text("自动恢复播放")
+                }
             }
 
             if server.allURLs.count > 1 {

@@ -55,13 +55,13 @@ final class PlayerManager: ObservableObject {
     @Published var currentArtwork: UIImage?
     @Published var currentItem: BaseItemDto?
 
-    private var player: AVPlayer?
+    var player: AVPlayer?
     private var timeObserver: Any?
     private var timeObserverPlayer: AVPlayer?
     private var cancellables = Set<AnyCancellable>()
     private var playbackEndCancellable: AnyCancellable?
     var currentServer: ServerConfig?
-    private var shuffledIndices: [Int] = []
+    var shuffledIndices: [Int] = []
 
     private init() {
         setupRemoteCommands()
@@ -91,6 +91,37 @@ final class PlayerManager: ObservableObject {
     }
 
     func playCurrentItem() {
+        playCurrentItem(autoPlay: true)
+    }
+
+    func prepareCurrentItem() async {
+        guard let item = currentItem, let server = currentServer else { return }
+        isLoading = true
+        errorMessage = nil
+
+        // 优先检查本地是否有下载的文件
+        if let localURL = DownloadManager.shared.getLocalURL(itemId: item.id, serverId: server.id.uuidString) {
+            let fm = FileManager.default
+            if fm.fileExists(atPath: localURL.path) {
+                if let attrs = try? fm.attributesOfItem(atPath: localURL.path),
+                   let fileSize = attrs[.size] as? Int64 {
+                    print("[PlayerManager] Preparing local file: \(localURL.path), size: \(fileSize) bytes")
+                }
+                await setupAudioSession()
+                await setupPlayer(url: localURL, autoPlay: false)
+                // 加载本地封面
+                await loadLocalArtwork(item: item, server: server)
+                return
+            } else {
+                print("[PlayerManager] Local file does not exist: \(localURL.path)")
+            }
+        }
+
+        // 本地没有，从服务器获取
+        await playCurrentItemAsync(autoPlay: false)
+    }
+
+    private func playCurrentItem(autoPlay: Bool) {
         guard let item = currentItem, let server = currentServer else { return }
         isLoading = true
         errorMessage = nil
@@ -105,7 +136,7 @@ final class PlayerManager: ObservableObject {
                 }
                 Task {
                     await setupAudioSession()
-                    await setupPlayer(url: localURL)
+                    await setupPlayer(url: localURL, autoPlay: autoPlay)
                 }
                 // 封面加载不阻塞播放
                 Task {
@@ -121,48 +152,65 @@ final class PlayerManager: ObservableObject {
         client.serverConfig = server
 
         Task {
-            do {
-                print("[PlayerManager] Fetching playback info for: \(item.id)")
-                let playbackInfo = try await client.getPlaybackInfo(itemId: item.id)
+            await playCurrentItemAsync(autoPlay: autoPlay)
+        }
+    }
 
-                var playURL: URL?
-                if let source = playbackInfo.mediaSources?.first {
-                    let enableDirectPlay = server.enableDirectPlay
-                    if enableDirectPlay, let directUrl = source.directStreamUrl, !directUrl.isEmpty {
-                        playURL = URL(string: directUrl)
-                    } else if enableDirectPlay, source.supportsDirectPlay == true, let path = source.path, !path.isEmpty {
-                        if path.hasPrefix("http") {
-                            playURL = URL(string: path)
-                        } else {
-                            playURL = URL(string: server.currentURL + "/Items/" + item.id + "/Download?api_key=" + (server.accessToken ?? ""))
-                        }
-                    } else if let directUrl = source.directStreamUrl, !directUrl.isEmpty {
-                        playURL = URL(string: directUrl)
-                    } else if let transcodeUrl = source.transcodingUrl, !transcodeUrl.isEmpty {
-                        var urlString = transcodeUrl
-                        if !urlString.hasPrefix("http") {
-                            urlString = server.serverURL + urlString
-                        }
-                        playURL = URL(string: urlString)
+    private func playCurrentItemAsync(autoPlay: Bool) async {
+        guard let item = currentItem, let server = currentServer else { return }
+
+        let client = JellyfinClient()
+        client.serverConfig = server
+
+        do {
+            print("[PlayerManager] Fetching playback info for: \(item.id)")
+            let playbackInfo = try await client.getPlaybackInfo(itemId: item.id)
+
+            var playURL: URL?
+            if let source = playbackInfo.mediaSources?.first {
+                let enableDirectPlay = UserDefaults.standard.bool(forKey: "allowDirectPlay")
+                if enableDirectPlay, let directUrl = source.directStreamUrl, !directUrl.isEmpty {
+                    playURL = URL(string: directUrl)
+                } else if enableDirectPlay, source.supportsDirectPlay == true, let path = source.path, !path.isEmpty {
+                    if path.hasPrefix("http") {
+                        playURL = URL(string: path)
                     } else {
-                        playURL = client.streamingURL(itemId: item.id, mediaSourceId: source.id) ?? client.hlsURL(itemId: item.id, mediaSourceId: source.id)
+                        playURL = URL(string: server.currentURL + "/Items/" + item.id + "/Download?api_key=" + (server.accessToken ?? ""))
                     }
+                } else if let directUrl = source.directStreamUrl, !directUrl.isEmpty {
+                    playURL = URL(string: directUrl)
+                } else if let transcodeUrl = source.transcodingUrl, !transcodeUrl.isEmpty {
+                    var urlString = transcodeUrl
+                    if !urlString.hasPrefix("http") {
+                        urlString = server.serverURL + urlString
+                    }
+                    playURL = URL(string: urlString)
+                } else {
+                    playURL = client.streamingURL(itemId: item.id, mediaSourceId: source.id) ?? client.hlsURL(itemId: item.id, mediaSourceId: source.id)
                 }
+            }
 
-                guard let url = playURL else {
+            guard let url = playURL else {
+                await MainActor.run {
                     errorMessage = "Cannot build stream URL"
                     isLoading = false
-                    return
                 }
+                return
+            }
 
-                print("[PlayerManager] Playing: \(url.absoluteString)")
-                await setupAudioSession()
-                await setupPlayer(url: url)
-                await loadArtwork(item: item, server: server)
+            print("[PlayerManager] Playing: \(url.absoluteString)")
+            await setupAudioSession()
+            await setupPlayer(url: url, autoPlay: autoPlay)
+            await loadArtwork(item: item, server: server)
+            if autoPlay {
                 await client.reportPlaybackStart(itemId: item.id)
+            }
+            await MainActor.run {
                 updateNowPlayingInfo()
-            } catch {
-                print("[PlayerManager] Error: \(error)")
+            }
+        } catch {
+            print("[PlayerManager] Error: \(error)")
+            await MainActor.run {
                 errorMessage = error.localizedDescription
                 isLoading = false
             }
@@ -174,6 +222,8 @@ final class PlayerManager: ObservableObject {
         if isPlaying {
             player?.pause()
             isPlaying = false
+            // 暂停时立即保存播放进度
+            PlaybackMemoryManager.shared.saveCurrentSession()
         } else {
             player?.play()
             isPlaying = true
@@ -184,6 +234,10 @@ final class PlayerManager: ObservableObject {
     func nextTrack() {
         guard !queue.isEmpty else { return }
         reportPlaybackStopped()
+        // 保存当前歌曲的会话状态
+        if let item = currentItem {
+            PlaybackMemoryManager.shared.markSessionCompleted(trackId: item.id)
+        }
         let nextIndex: Int
         if shuffleMode == .on {
             let currentShuffled = shuffledIndices.firstIndex(of: currentIndex) ?? 0
@@ -203,6 +257,10 @@ final class PlayerManager: ObservableObject {
             return
         }
         reportPlaybackStopped()
+        // 保存当前歌曲的会话状态
+        if let item = currentItem {
+            PlaybackMemoryManager.shared.markSessionCompleted(trackId: item.id)
+        }
         let prevIndex: Int
         if shuffleMode == .on {
             let currentShuffled = shuffledIndices.firstIndex(of: currentIndex) ?? 0
@@ -218,7 +276,13 @@ final class PlayerManager: ObservableObject {
     func seek(to progress: Double) {
         guard let player = player else { return }
         let targetTime = CMTime(seconds: progress * duration, preferredTimescale: 600)
-        player.seek(to: targetTime)
+        player.seek(to: targetTime) { [weak self] _ in
+            guard let self = self else { return }
+            // 如果当前不是播放状态，seek 完成后确保暂停
+            if !self.isPlaying {
+                player.pause()
+            }
+        }
         updateNowPlayingInfo()
     }
 
@@ -258,6 +322,8 @@ final class PlayerManager: ObservableObject {
 
     func stop() {
         reportPlaybackStopped()
+        // 停止时保存当前播放进度
+        PlaybackMemoryManager.shared.saveCurrentSession()
         removeTimeObserver()
         playbackEndCancellable?.cancel()
         playbackEndCancellable = nil
@@ -299,7 +365,7 @@ final class PlayerManager: ObservableObject {
         #endif
     }
 
-    private func setupPlayer(url: URL) async {
+    private func setupPlayer(url: URL, autoPlay: Bool = true) async {
         let asset = AVAsset(url: url)
         let playerItem = AVPlayerItem(asset: asset)
 
@@ -309,11 +375,11 @@ final class PlayerManager: ObservableObject {
             player = AVPlayer(playerItem: playerItem)
         }
 
-        await waitForItemReady()
+        await waitForItemReady(autoPlay: autoPlay)
         addTimeObserver()
     }
 
-    private func waitForItemReady() async {
+    private func waitForItemReady(autoPlay: Bool = true) async {
         guard let item = player?.currentItem else { return }
 
         while item.status == .unknown {
@@ -326,10 +392,14 @@ final class PlayerManager: ObservableObject {
                 self.isLoading = false
                 let durationSeconds = item.duration.seconds
                 self.duration = durationSeconds.isFinite ? durationSeconds : 0
-                self.player?.play()
-                self.isPlaying = true
+                if autoPlay {
+                    self.player?.play()
+                    self.isPlaying = true
+                } else {
+                    self.isPlaying = false
+                }
                 self.updateNowPlayingInfo()
-                print("[PlayerManager] Playback started, duration: \(self.duration)")
+                print("[PlayerManager] Playback ready, duration: \(self.duration), autoPlay: \(autoPlay)")
             case .failed:
                 self.isLoading = false
                 let errorDesc = item.error?.localizedDescription ?? "Unknown playback error"
@@ -346,12 +416,18 @@ final class PlayerManager: ObservableObject {
 
     private var lastReportedTime: Double = 0
     private var progressReportTask: Task<Void, Never>?
+    private var memorySaveTask: Task<Void, Never>?
+    private var lastMemorySaveTime: Double = 0
 
     private func setupPlaybackEndObserver() {
         playbackEndCancellable = NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 guard let self = self else { return }
+                // 标记会话已完成
+                if let item = self.currentItem {
+                    PlaybackMemoryManager.shared.markSessionCompleted(trackId: item.id)
+                }
                 if self.repeatMode == .one {
                     self.seek(to: 0)
                     self.player?.play()
@@ -372,8 +448,22 @@ final class PlayerManager: ObservableObject {
                 self.progress = self.currentTime / self.duration
             }
             self.reportProgressIfNeeded()
+            self.savePlaybackMemoryIfNeeded()
         }
         timeObserverPlayer = player
+    }
+
+    private func savePlaybackMemoryIfNeeded() {
+        let saveInterval: Double = 5
+        if currentTime - lastMemorySaveTime >= saveInterval {
+            lastMemorySaveTime = currentTime
+            memorySaveTask?.cancel()
+            memorySaveTask = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard !Task.isCancelled else { return }
+                PlaybackMemoryManager.shared.saveCurrentSession()
+            }
+        }
     }
 
     private func reportProgressIfNeeded() {

@@ -14,6 +14,7 @@ struct funPlayerApp: App {
             FavoriteItem.self,
             DownloadItem.self,
             SearchHistoryItem.self,
+            PlaybackSession.self,
         ])
         let modelConfiguration = ModelConfiguration(
             schema: schema,
