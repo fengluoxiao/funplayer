@@ -6,7 +6,6 @@
 import SwiftUI
 import MediaPlayer
 import AVKit
-import LNPopupUI
 
 struct FullScreenPlayer: View {
     @StateObject private var player = PlayerManager.shared

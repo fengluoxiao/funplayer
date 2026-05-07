@@ -54,7 +54,7 @@ struct ToastOverlay: View {
             toastContent
         }
         .animation(.easeInOut(duration: 0.3), value: toast.isShowing)
-        .ignoresSafeArea()
+        .allowsHitTesting(toast.isShowing)
     }
 
     @ViewBuilder

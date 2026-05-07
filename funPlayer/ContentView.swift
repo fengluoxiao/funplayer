@@ -10,6 +10,7 @@ import Combine
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.colorScheme) private var colorScheme
     @Query(sort: \ServerConfig.dateAdded) private var servers: [ServerConfig]
     @StateObject private var player = PlayerManager.shared
     @StateObject private var appState = AppState.shared
@@ -140,17 +141,18 @@ struct ContentView: View {
                     }
                 }
             }
-            .toolbarColorScheme(.light, for: .tabBar)
             .tabBarMinimizeBehavior(.onScrollDown)
+            .toolbarBackground(.visible, for: .tabBar)
             .tabViewBottomAccessory {
                 if player.currentItem != nil {
-                    MiniPlayerAccessoryView()
+                    MiniPlayerAccessoryView(systemColorScheme: colorScheme)
                         .contentShape(Rectangle())
                         .onTapGesture {
                             withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                                 player.showFullScreenPlayer = true
                             }
                         }
+                        .environment(\.colorScheme, .light)
                 }
             }
         }
@@ -1610,14 +1612,15 @@ struct ServerListSection: View {
 struct MiniPlayerAccessoryView: View {
     @StateObject private var player = PlayerManager.shared
     @Environment(\.tabViewBottomAccessoryPlacement) private var placement
+    var systemColorScheme: ColorScheme
 
     var body: some View {
         Group {
             switch placement {
             case .inline:
-                InlineMiniPlayerView()
+                InlineMiniPlayerView(systemColorScheme: systemColorScheme)
             case .expanded, .none:
-                ExpandedMiniPlayerView()
+                ExpandedMiniPlayerView(systemColorScheme: systemColorScheme)
             }
         }
         .frame(maxWidth: .infinity)
@@ -1626,6 +1629,8 @@ struct MiniPlayerAccessoryView: View {
 
 struct InlineMiniPlayerView: View {
     @StateObject private var player = PlayerManager.shared
+    @StateObject private var appState = AppState.shared
+    var systemColorScheme: ColorScheme
 
     var body: some View {
         HStack(spacing: 12) {
@@ -1646,10 +1651,11 @@ struct InlineMiniPlayerView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(player.currentItem?.name ?? "Not Playing")
                     .font(.caption.weight(.medium))
+                    .foregroundColor(appState.isInAlbumDetail ? .black : (systemColorScheme == .dark ? .white : .black))
                     .lineLimit(1)
                 Text(artistText())
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundColor(appState.isInAlbumDetail ? .black.opacity(0.6) : (systemColorScheme == .dark ? .white.opacity(0.7) : .black.opacity(0.6)))
                     .lineLimit(1)
             }
 
@@ -1668,7 +1674,6 @@ struct InlineMiniPlayerView: View {
         .padding(.leading, 16)
         .padding(.trailing, 4)
         .frame(height: 60)
-        .background(Color.clear)
     }
 
     private func artistText() -> String {
@@ -1679,6 +1684,8 @@ struct InlineMiniPlayerView: View {
 
 struct ExpandedMiniPlayerView: View {
     @StateObject private var player = PlayerManager.shared
+    @StateObject private var appState = AppState.shared
+    var systemColorScheme: ColorScheme
 
     var body: some View {
         HStack(spacing: 12) {
@@ -1699,10 +1706,11 @@ struct ExpandedMiniPlayerView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(player.currentItem?.name ?? "Not Playing")
                     .font(.caption.weight(.medium))
+                    .foregroundColor(appState.isInAlbumDetail ? .black : (systemColorScheme == .dark ? .white : .black))
                     .lineLimit(1)
                 Text(artistText())
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundColor(appState.isInAlbumDetail ? .black.opacity(0.6) : (systemColorScheme == .dark ? .white.opacity(0.7) : .black.opacity(0.6)))
                     .lineLimit(1)
             }
 
@@ -1732,7 +1740,6 @@ struct ExpandedMiniPlayerView: View {
         .padding(.leading, 12)
         .padding(.trailing, 8)
         .frame(height: 60)
-        .background(Color.clear)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .padding(.horizontal, 16)
     }

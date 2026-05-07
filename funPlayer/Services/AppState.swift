@@ -13,6 +13,7 @@ final class AppState: ObservableObject {
 
     var selectedServer: ServerConfig?
     var modelContext: ModelContext?
+    @Published var isInAlbumDetail = false
 
     var selectedLibraryIds: [String] {
         selectedServer?.selectedLibraryIds ?? []

@@ -668,9 +668,11 @@ struct AlbumTrackListView: View {
         .onAppear {
             ToastManager.shared.useSystemColor = false
             ToastManager.shared.foregroundColor = .black
+            AppState.shared.isInAlbumDetail = true
         }
         .onDisappear {
             ToastManager.shared.useSystemColor = true
+            AppState.shared.isInAlbumDetail = false
         }
     }
 
