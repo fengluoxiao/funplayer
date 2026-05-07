@@ -84,7 +84,7 @@ private struct PlaybackControlsView: View {
             } label: {
                 Image(systemName: isFav ? "heart.fill" : "heart")
                     .font(.body)
-                    .foregroundStyle(isFav ? .red : .primary)
+                    .foregroundStyle(isFav ? .red : Color.accentColor)
                     .frame(width: 36, height: 44)
             }
             .padding(.trailing, 4)
@@ -94,6 +94,7 @@ private struct PlaybackControlsView: View {
             } label: {
                 Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
                     .font(.title3)
+                    .foregroundStyle(Color.accentColor)
                     .frame(width: 44, height: 44)
             }
             .padding(.trailing, 8)
@@ -103,6 +104,7 @@ private struct PlaybackControlsView: View {
             } label: {
                 Image(systemName: "forward.fill")
                     .font(.body)
+                    .foregroundStyle(Color.accentColor)
                     .frame(width: 36, height: 44)
             }
             .padding(.trailing, 12)

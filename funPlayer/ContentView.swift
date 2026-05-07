@@ -7,7 +7,6 @@
 import SwiftUI
 import SwiftData
 import Combine
-import LNPopupUI
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
@@ -32,6 +31,9 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showAddServer) {
             ServerSetupView(showAddServer: $showAddServer)
+        }
+        .fullScreenCover(isPresented: $player.showFullScreenPlayer) {
+            FullScreenPlayer()
         }
         .onAppear {
             appState.modelContext = modelContext
@@ -140,21 +142,16 @@ struct ContentView: View {
             }
             .toolbarColorScheme(.light, for: .tabBar)
             .tabBarMinimizeBehavior(.onScrollDown)
-            .popup(isBarPresented: Binding(
-                get: { player.currentItem != nil },
-                set: { _ in }
-            ), isPopupOpen: $player.showFullScreenPlayer) {
-                FullScreenPlayer()
-                    .popupItem {
-                        makePopupItem()
-                    }
-            }
-            .popupBarStyle(.floatingCompact)
-            .popupCloseButtonStyle(.none)
-            .popupBarTitleTextAttributes(AttributeContainer().font(.systemFont(ofSize: 12, weight: .medium)))
-            .popupBarSubtitleTextAttributes(AttributeContainer().font(.systemFont(ofSize: 10)))
-            .popupBarCustomizer { popupBar in
-                popupBar.overrideUserInterfaceStyle = .light
+            .tabViewBottomAccessory {
+                if player.currentItem != nil {
+                    MiniPlayerAccessoryView()
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                                player.showFullScreenPlayer = true
+                            }
+                        }
+                }
             }
         }
     }
@@ -164,50 +161,7 @@ struct ContentView: View {
         return item.albumArtist ?? item.artists?.first ?? item.album ?? ""
     }
 
-    private func makePopupItem() -> PopupItem<String, String, String, some ToolbarContent> {
-        let player = PlayerManager.shared
-        let item = player.currentItem
-        let title = item?.name ?? "Not Playing"
-        let subtitle = artistText()
-        let image = popupBarImage(for: item)
 
-        return PopupItem(id: item?.id ?? "noItem", title: title, subtitle: subtitle, image: image) {
-            ToolbarItem(placement: .popupBar) {
-                HStack(spacing: 20) {
-                    Button {
-                        player.togglePlayPause()
-                    } label: {
-                        Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                    }
-                    .frame(minWidth: 30)
-
-                    Button {
-                        player.nextTrack()
-                    } label: {
-                        Image(systemName: "forward.fill")
-                    }
-                    .frame(minWidth: 30)
-                }
-            }
-        }
-    }
-
-    private func popupBarImage(for item: BaseItemDto?) -> PopupItemImage? {
-        guard let item = item else { return nil }
-
-        if let cachedImage = ArtworkCache.shared.image(for: item.id) {
-            return PopupItemImage(Image(uiImage: cachedImage))
-        }
-
-        if let localArtworkURL = DownloadManager.shared.getLocalArtworkURL(itemId: item.id),
-           let data = try? Data(contentsOf: localArtworkURL),
-           let image = UIImage(data: data) {
-            ArtworkCache.shared.setImage(image, for: item.id)
-            return PopupItemImage(Image(uiImage: image))
-        }
-
-        return nil
-    }
 }
 
 // MARK: - Welcome View
@@ -1666,6 +1620,7 @@ struct MiniPlayerAccessoryView: View {
                 ExpandedMiniPlayerView()
             }
         }
+        .frame(maxWidth: .infinity)
     }
 }
 
@@ -1673,20 +1628,22 @@ struct InlineMiniPlayerView: View {
     @StateObject private var player = PlayerManager.shared
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 12) {
             // 专辑封面
             Group {
                 if let image = player.currentArtwork {
                     Image(uiImage: image)
                         .resizable()
                         .aspectRatio(contentMode: .fill)
+                } else {
+                    Color.gray.opacity(0.3)
                 }
             }
             .frame(width: 32, height: 32)
-            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
 
             // 歌曲信息
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(player.currentItem?.name ?? "Not Playing")
                     .font(.caption.weight(.medium))
                     .lineLimit(1)
@@ -1698,32 +1655,20 @@ struct InlineMiniPlayerView: View {
 
             Spacer()
 
-            // 播放控制
-            HStack(spacing: 12) {
-                Button {
+            // 播放按钮
+            Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                .font(.body)
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 36, height: 44)
+                .contentShape(Rectangle())
+                .onTapGesture {
                     player.togglePlayPause()
-                } label: {
-                    Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.caption)
                 }
-
-                Button {
-                    player.nextTrack()
-                } label: {
-                    Image(systemName: "forward.fill")
-                        .font(.caption)
-                }
-            }
         }
-        .padding(.horizontal, 12)
-        .frame(height: 44)
+        .padding(.leading, 16)
+        .padding(.trailing, 4)
+        .frame(height: 60)
         .background(Color.clear)
-        .clipShape(Capsule())
-        .onTapGesture {
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                player.showFullScreenPlayer = true
-            }
-        }
     }
 
     private func artistText() -> String {
@@ -1743,18 +1688,20 @@ struct ExpandedMiniPlayerView: View {
                     Image(uiImage: image)
                         .resizable()
                         .aspectRatio(contentMode: .fill)
+                } else {
+                    Color.gray.opacity(0.3)
                 }
             }
-            .frame(width: 40, height: 40)
+            .frame(width: 32, height: 32)
             .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
 
             // 歌曲信息
             VStack(alignment: .leading, spacing: 2) {
                 Text(player.currentItem?.name ?? "Not Playing")
-                    .font(.subheadline.weight(.medium))
+                    .font(.caption.weight(.medium))
                     .lineLimit(1)
                 Text(artistText())
-                    .font(.caption)
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
@@ -1762,32 +1709,32 @@ struct ExpandedMiniPlayerView: View {
             Spacer()
 
             // 播放控制
-            HStack(spacing: 16) {
-                Button {
-                    player.togglePlayPause()
-                } label: {
-                    Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.title3)
-                }
+            HStack(spacing: 0) {
+                Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                    .font(.title3)
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 40, height: 44)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        player.togglePlayPause()
+                    }
 
-                Button {
-                    player.nextTrack()
-                } label: {
-                    Image(systemName: "forward.fill")
-                        .font(.body)
-                }
+                Image(systemName: "forward.fill")
+                    .font(.body)
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 36, height: 44)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        player.nextTrack()
+                    }
             }
         }
-        .padding(.horizontal, 16)
+        .padding(.leading, 12)
+        .padding(.trailing, 8)
         .frame(height: 60)
         .background(Color.clear)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .padding(.horizontal, 16)
-        .onTapGesture {
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                player.showFullScreenPlayer = true
-            }
-        }
     }
 
     private func artistText() -> String {
