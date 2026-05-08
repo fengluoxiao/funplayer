@@ -277,6 +277,13 @@ struct ServerSetupView: View {
             server.name = name
             server.serverURL = urlString
             server.secondaryURLs = secondaryURLs
+            server.selectedLibraryIds = selectedLibraryIds
+            // 保存媒体库名称映射
+            var names: [String: String] = [:]
+            for library in libraries {
+                names[library.id] = library.name ?? "媒体库"
+            }
+            server.libraryNames = names
 
             try? modelContext.save()
             isConnecting = false
@@ -331,6 +338,10 @@ struct ServerSetupView: View {
         isLoadingLibraries = true
         do {
             libraries = try await client.getViews()
+            // 首次添加服务器时，默认全选所有媒体库
+            if !isEditing && selectedLibraryIds.isEmpty {
+                selectedLibraryIds = libraries.map { $0.id }
+            }
         } catch {
             print("[ServerSetupView] Error loading libraries: \(error)")
             libraries = []
@@ -349,6 +360,12 @@ struct ServerSetupView: View {
     private func finishSetup() {
         guard let server = newServer else { return }
         server.selectedLibraryIds = selectedLibraryIds
+        // 保存媒体库名称映射
+        var names: [String: String] = [:]
+        for library in libraries {
+            names[library.id] = library.name ?? "媒体库"
+        }
+        server.libraryNames = names
         try? modelContext.save()
         appState.selectLibraries(selectedLibraryIds, modelContext: modelContext)
         showAddServer = false

@@ -35,8 +35,8 @@ struct MiniPlayer: View {
             } else {
                 // 没有播放内容时显示提示
                 Text("未在播放")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.primary)
                     .padding(.leading, 16)
                 Spacer()
             }

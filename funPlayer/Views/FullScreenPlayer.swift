@@ -6,11 +6,13 @@
 import SwiftUI
 import MediaPlayer
 import AVKit
+import LNPopupUI
 
 struct FullScreenPlayer: View {
     @StateObject private var player = PlayerManager.shared
     @StateObject private var favorites = FavoritesManager.shared
     @State private var draggingProgress: Double?
+    @Environment(\.popupBarPlacement) var popupBarPlacement
 
     private var accentColor: Color { player.accentColor }
 
@@ -25,16 +27,36 @@ struct FullScreenPlayer: View {
                 Spacer(minLength: 0)
 
                 controlPanel()
-                    .padding(.bottom, safeAreaBottom + 30)
+                    .padding(.bottom, bottomSafeArea + 30)
             }
 
             VStack {
                 HStack {
                     closeButton()
-                        .padding(.top, safeAreaTop)
+                        .padding(.top, topSafeArea)
                     Spacer()
                 }
                 Spacer()
+            }
+        }
+        .popupItem {
+            PopupItem(id: player.currentItem?.id ?? "noItem", title: player.currentItem?.name ?? "Not Playing", subtitle: artistText(), image: popupBarImage()) {
+                ToolbarItemGroup(placement: .popupBar) {
+                    Button {
+                        player.togglePlayPause()
+                    } label: {
+                        Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                    }
+                    .frame(minWidth: popupBarPlacement == .inline ? nil : 30)
+
+                    if popupBarPlacement != .inline {
+                        Button {
+                            player.nextTrack()
+                        } label: {
+                            Image(systemName: "forward.fill")
+                        }
+                    }
+                }
             }
         }
         .sheet(isPresented: $player.showPlaylist) {
@@ -43,7 +65,19 @@ struct FullScreenPlayer: View {
                 .presentationDragIndicator(.visible)
                 .presentationBackgroundInteraction(.enabled)
         }
+    }
 
+    private func artistText() -> String {
+        guard let item = player.currentItem else { return "" }
+        return item.albumArtist ?? item.artists?.first ?? item.album ?? ""
+    }
+
+    private func popupBarImage() -> PopupItemImage? {
+        guard let item = player.currentItem else { return nil }
+        if let cachedImage = ArtworkCache.shared.image(for: item.id) {
+            return PopupItemImage(Image(uiImage: cachedImage))
+        }
+        return nil
     }
 
     @ViewBuilder
@@ -100,13 +134,13 @@ struct FullScreenPlayer: View {
         .padding(.horizontal)
     }
 
-    private var safeAreaTop: CGFloat {
+    private var topSafeArea: CGFloat {
         UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
             .first?.windows.first?.safeAreaInsets.top ?? 0
     }
 
-    private var safeAreaBottom: CGFloat {
+    private var bottomSafeArea: CGFloat {
         UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
             .first?.windows.first?.safeAreaInsets.bottom ?? 0
@@ -383,11 +417,6 @@ struct FullScreenPlayer: View {
         let mins = Int(seconds) / 60
         let secs = Int(seconds) % 60
         return String(format: "%d:%02d", mins, secs)
-    }
-
-    private func artistText() -> String {
-        guard let item = player.currentItem else { return "" }
-        return item.albumArtist ?? item.artists?.first ?? item.album ?? ""
     }
 
     private func artworkImage() -> Image? {

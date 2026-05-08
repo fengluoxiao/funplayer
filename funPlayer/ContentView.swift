@@ -7,6 +7,7 @@
 import SwiftUI
 import SwiftData
 import Combine
+import LNPopupUI
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
@@ -32,9 +33,6 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showAddServer) {
             ServerSetupView(showAddServer: $showAddServer)
-        }
-        .fullScreenCover(isPresented: $player.showFullScreenPlayer) {
-            FullScreenPlayer()
         }
         .onAppear {
             appState.modelContext = modelContext
@@ -155,20 +153,21 @@ struct ContentView: View {
             }
             .tabBarMinimizeBehavior(.onScrollDown)
             .toolbarBackground(.visible, for: .tabBar)
-            .tabViewBottomAccessory {
-                MiniPlayerAccessoryView(systemColorScheme: colorScheme)
-                    .contentShape(Rectangle())
-                    .environment(\.colorScheme, .light)
+            .popup(isBarPresented: Binding(
+                get: { player.currentItem != nil },
+                set: { _ in }
+            ), isPopupOpen: $player.showFullScreenPlayer) {
+                FullScreenPlayer()
+            }
+            .popupBarStyle(.floatingCompact)
+            .popupCloseButtonStyle(.none)
+            .popupBarTitleTextAttributes(AttributeContainer().font(.systemFont(ofSize: 12, weight: .medium)))
+            .popupBarSubtitleTextAttributes(AttributeContainer().font(.systemFont(ofSize: 10)))
+            .popupBarCustomizer { popupBar in
+                popupBar.overrideUserInterfaceStyle = .light
             }
         }
     }
-
-    private func artistText() -> String {
-        guard let item = PlayerManager.shared.currentItem else { return "" }
-        return item.albumArtist ?? item.artists?.first ?? item.album ?? ""
-    }
-
-
 }
 
 // MARK: - Welcome View
@@ -247,6 +246,13 @@ struct HomeTabView: View {
                             description: Text("请在设置中选择服务器")
                         )
                         .padding(.top, 40)
+                    } else if appState.selectedLibraryIds.isEmpty {
+                        ContentUnavailableView(
+                            "未选择媒体库",
+                            systemImage: "square.stack",
+                            description: Text("请在设置中选择媒体库")
+                        )
+                        .padding(.top, 40)
                     } else if isLoading {
                         HStack {
                             Spacer()
@@ -298,6 +304,14 @@ struct HomeTabView: View {
                     )
                 }
             }
+            .navigationDestination(for: String.self) { albumId in
+                AlbumTrackListView(
+                    server: appState.selectedServer!,
+                    albumId: albumId,
+                    title: "专辑",
+                    path: $path
+                )
+            }
             .task {
                 await loadData()
             }
@@ -328,7 +342,13 @@ struct HomeTabView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 16) {
                     ForEach(items) { item in
-                        HomeItemCard(item: item, client: client)
+                        HomeItemCard(
+                            item: item,
+                            client: client,
+                            onSelectAlbum: { albumId in
+                                path.append(albumId)
+                            }
+                        )
                     }
                 }
                 .padding(.horizontal, 16)
@@ -337,19 +357,29 @@ struct HomeTabView: View {
     }
 
     private func loadData() async {
-        guard let server = appState.selectedServer, server.isAuthenticated else {
-            isLoading = false
-            return
-        }
-
-        client.serverConfig = server
-
         let showDownloadedOnly = UserDefaults.standard.bool(forKey: "showDownloadedOnly")
+
+        // 离线模式只需要选中的服务器
         if showDownloadedOnly {
+            guard let server = appState.selectedServer else {
+                isLoading = false
+                return
+            }
+            client.serverConfig = server
+            let libraryIds = appState.selectedLibraryIds
+            guard !libraryIds.isEmpty else {
+                isLoading = false
+                return
+            }
             isLoading = true
             let downloadedItems = downloadManager.getDownloadedItems(forServerId: server.id.uuidString)
+            // 按选中的媒体库过滤
+            let filteredItems = downloadedItems.filter {
+                guard let itemLibraryId = $0.libraryId else { return false }
+                return libraryIds.contains(itemLibraryId)
+            }
             var items: [BaseItemDto] = []
-            for download in downloadedItems {
+            for download in filteredItems {
                 let dto = BaseItemDto(
                     id: download.itemId,
                     name: download.name,
@@ -377,6 +407,14 @@ struct HomeTabView: View {
             isLoading = false
             return
         }
+
+        // 在线模式需要认证
+        guard let server = appState.selectedServer, server.isAuthenticated else {
+            isLoading = false
+            return
+        }
+
+        client.serverConfig = server
 
         isLoading = true
         let libraryIds = appState.selectedLibraryIds
@@ -412,13 +450,25 @@ struct HomeItemCard: View {
     let client: JellyfinClient
     @StateObject private var player = PlayerManager.shared
     @State private var localArtwork: UIImage?
+    var onSelectAlbum: ((String) -> Void)?
 
     private var isAlbum: Bool {
         item.type == "MusicAlbum"
     }
 
+    private var typeBadgeInfo: (String, Color) {
+        switch item.type {
+        case "Audio": return ("歌曲", .pink)
+        case "MusicAlbum": return ("专辑", .purple)
+        case "MusicArtist": return ("艺人", .blue)
+        case "Movie": return ("电影", .orange)
+        case "Series", "Episode": return ("剧集", .green)
+        default: return ("", .gray)
+        }
+    }
+
     var body: some View {
-        let content = VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 8) {
             Group {
                 if let localImage = localArtwork {
                     Image(uiImage: localImage)
@@ -444,10 +494,23 @@ struct HomeItemCard: View {
                 loadLocalArtwork()
             }
 
-            Text(item.name ?? "Unknown")
-                .font(.subheadline.bold())
-                .lineLimit(1)
-                .frame(width: 150, alignment: .leading)
+            HStack(spacing: 6) {
+                Text(item.name ?? "Unknown")
+                    .font(.subheadline.bold())
+                    .lineLimit(1)
+
+                let (badgeText, badgeColor) = typeBadgeInfo
+                if !badgeText.isEmpty {
+                    Text(badgeText)
+                        .font(.system(size: 9, weight: .bold))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(badgeColor.opacity(0.15))
+                        .foregroundStyle(badgeColor)
+                        .clipShape(Capsule())
+                }
+            }
+            .frame(width: 150, alignment: .leading)
 
             if let artist = item.albumArtist ?? item.artists?.first ?? item.seriesName {
                 Text(artist)
@@ -455,27 +518,38 @@ struct HomeItemCard: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .frame(width: 150, alignment: .leading)
+            } else if item.type == "Audio" {
+                Text(item.album ?? "")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .frame(width: 150, alignment: .leading)
             }
         }
         .contentShape(Rectangle())
+        .simultaneousGesture(
+            TapGesture()
+                .onEnded { _ in
+                    handleTap()
+                }
+        )
+    }
 
-        if isAlbum, let server = client.serverConfig {
-            NavigationLink(value: item) {
-                content
-            }
-            .buttonStyle(.plain)
+    private func handleTap() {
+        print("[HomeItemCard] tapped, type: \(item.type ?? "nil"), isAlbum: \(isAlbum)")
+        if isAlbum {
+            onSelectAlbum?(item.id)
         } else {
-            Button {
-                playSingle()
-            } label: {
-                content
-            }
-            .buttonStyle(.plain)
+            playSingle()
         }
     }
 
     private func playSingle() {
-        guard let server = client.serverConfig else { return }
+        guard let server = client.serverConfig else {
+            print("[HomeItemCard] playSingle failed: serverConfig is nil")
+            return
+        }
+        print("[HomeItemCard] playSingle: \(item.name ?? "unknown")")
         player.playSingle(item: item, server: server)
     }
 
@@ -710,22 +784,31 @@ struct LibraryTabView: View {
     }
 
     private func loadLibraryData() async {
-        guard let server = appState.selectedServer, server.isAuthenticated else {
-            isLoading = false
-            return
-        }
-
-        client.serverConfig = server
-
         let showDownloadedOnly = UserDefaults.standard.bool(forKey: "showDownloadedOnly")
+
+        // 离线模式只需要选中的服务器
         if showDownloadedOnly {
+            guard let server = appState.selectedServer else {
+                isLoading = false
+                return
+            }
+            let libraryIds = appState.selectedLibraryIds
+            guard !libraryIds.isEmpty else {
+                isLoading = false
+                return
+            }
             isLoading = true
             let downloadedItems = downloadManager.getDownloadedItems(forServerId: server.id.uuidString)
+            // 按选中的媒体库过滤
+            let filteredItems = downloadedItems.filter {
+                guard let itemLibraryId = $0.libraryId else { return false }
+                return libraryIds.contains(itemLibraryId)
+            }
             var allAlbums: [BaseItemDto] = []
             var allSongs: [BaseItemDto] = []
             var albumMap: [String: BaseItemDto] = [:]
 
-            for download in downloadedItems {
+            for download in filteredItems {
                 let dto = BaseItemDto(
                     id: download.itemId,
                     name: download.name,
@@ -801,7 +884,7 @@ struct LibraryTabView: View {
             allAlbums = Array(albumMap.values).sorted { ($0.name ?? "") < ($1.name ?? "") }
 
             var artistMap: [String: BaseItemDto] = [:]
-            for download in downloadedItems {
+            for download in filteredItems {
                 if let artist = download.artist, !artist.isEmpty {
                     if artistMap[artist] == nil {
                         let artistDto = BaseItemDto(
@@ -835,6 +918,14 @@ struct LibraryTabView: View {
             isLoading = false
             return
         }
+
+        // 在线模式需要认证
+        guard let server = appState.selectedServer, server.isAuthenticated else {
+            isLoading = false
+            return
+        }
+
+        client.serverConfig = server
 
         isLoading = true
 
@@ -1327,7 +1418,7 @@ struct SettingsTabView: View {
                 onDelete: deleteServer
             )
 
-            if let server = appState.selectedServer, server.isAuthenticated {
+            if let server = appState.selectedServer, server.isAuthenticated || showDownloadedOnly {
                 LibrariesSection(
                     isLoading: isLoadingLibraries,
                     libraries: libraries,
@@ -1377,6 +1468,40 @@ struct SettingsTabView: View {
     }
 
     private func loadLibraries() async {
+        let showDownloadedOnly = UserDefaults.standard.bool(forKey: "showDownloadedOnly")
+
+        // 离线模式下，显示所有保存的媒体库（包括未勾选的）
+        if showDownloadedOnly {
+            guard let server = appState.selectedServer else {
+                libraries = []
+                return
+            }
+            isLoadingLibraries = true
+            // 使用 libraryNames 中的所有键，显示所有媒体库
+            var allLibraryIds = Array(server.libraryNames.keys)
+            // 兜底：如果 libraryNames 为空，但 selectedLibraryIds 有值，也显示出来
+            if allLibraryIds.isEmpty && !server.selectedLibraryIds.isEmpty {
+                allLibraryIds = server.selectedLibraryIds
+            }
+            if !allLibraryIds.isEmpty {
+                var libraryItems: [BaseItemDto] = []
+                for libraryId in allLibraryIds {
+                    let name = server.libraryNames[libraryId] ?? "媒体库"
+                    libraryItems.append(BaseItemDto(
+                        id: libraryId,
+                        name: name,
+                        type: "CollectionFolder"
+                    ))
+                }
+                libraries = libraryItems
+            } else {
+                libraries = []
+            }
+            isLoadingLibraries = false
+            return
+        }
+
+        // 在线模式需要认证
         guard let server = appState.selectedServer, server.isAuthenticated else {
             libraries = []
             return
@@ -1386,6 +1511,13 @@ struct SettingsTabView: View {
         client.serverConfig = server
         do {
             libraries = try await client.getViews()
+            // 更新媒体库名称映射
+            var names = server.libraryNames
+            for library in libraries {
+                names[library.id] = library.name ?? "媒体库"
+            }
+            server.libraryNames = names
+            try? modelContext.save()
         } catch {
             print("[SettingsTabView] Error loading libraries: \(error)")
             libraries = []
@@ -1530,6 +1662,7 @@ struct PlaybackSettingsSection: View {
                     Text("离线模式")
                 }
             }
+            .disabled(true)
 
             Toggle(isOn: $allowDirectPlay) {
                 HStack {
@@ -1722,13 +1855,20 @@ struct InlineMiniPlayerView: View {
             } else {
                 Text("未在播放")
                     .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
+                    .foregroundColor(appState.isInAlbumDetail ? .black : (systemColorScheme == .dark ? .white : .black))
                 Spacer()
             }
         }
         .padding(.leading, 16)
         .padding(.trailing, 4)
         .frame(height: 60)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard player.currentItem != nil else { return }
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                player.showFullScreenPlayer = true
+            }
+        }
     }
 
     private func artistText(for item: BaseItemDto) -> String {
@@ -1794,7 +1934,7 @@ struct ExpandedMiniPlayerView: View {
             } else {
                 Text("未在播放")
                     .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
+                    .foregroundColor(appState.isInAlbumDetail ? .black : (systemColorScheme == .dark ? .white : .black))
                 Spacer()
             }
         }
@@ -1803,6 +1943,13 @@ struct ExpandedMiniPlayerView: View {
         .frame(height: 60)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .padding(.horizontal, 16)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard player.currentItem != nil else { return }
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                player.showFullScreenPlayer = true
+            }
+        }
     }
 
     private func artistText(for item: BaseItemDto) -> String {

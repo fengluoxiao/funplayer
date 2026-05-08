@@ -424,7 +424,10 @@ final class PlaybackMemoryManager: ObservableObject {
 
     var shouldAutoRestore: Bool {
         get {
-            UserDefaults.standard.bool(forKey: "playback_auto_restore")
+            if UserDefaults.standard.object(forKey: "playback_auto_restore") == nil {
+                return true
+            }
+            return UserDefaults.standard.bool(forKey: "playback_auto_restore")
         }
         set {
             UserDefaults.standard.set(newValue, forKey: "playback_auto_restore")

@@ -44,6 +44,7 @@ struct BaseItemDto: Codable, Identifiable, Hashable {
     let backdropImageTags: [String]?
     let mediaType: String?
     let collectionType: String?
+    let parentId: String?
 
     enum CodingKeys: String, CodingKey {
         case id = "Id"
@@ -64,6 +65,49 @@ struct BaseItemDto: Codable, Identifiable, Hashable {
         case backdropImageTags = "BackdropImageTags"
         case mediaType = "MediaType"
         case collectionType = "CollectionType"
+        case parentId = "ParentId"
+    }
+
+    init(
+        id: String,
+        name: String? = nil,
+        type: String? = nil,
+        overview: String? = nil,
+        indexNumber: Int? = nil,
+        parentIndexNumber: Int? = nil,
+        seriesName: String? = nil,
+        album: String? = nil,
+        albumId: String? = nil,
+        albumArtist: String? = nil,
+        artists: [String]? = nil,
+        runTimeTicks: Int64? = nil,
+        userData: UserData? = nil,
+        primaryImageAspectRatio: Double? = nil,
+        imageTags: [String: String]? = nil,
+        backdropImageTags: [String]? = nil,
+        mediaType: String? = nil,
+        collectionType: String? = nil,
+        parentId: String? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.type = type
+        self.overview = overview
+        self.indexNumber = indexNumber
+        self.parentIndexNumber = parentIndexNumber
+        self.seriesName = seriesName
+        self.album = album
+        self.albumId = albumId
+        self.albumArtist = albumArtist
+        self.artists = artists
+        self.runTimeTicks = runTimeTicks
+        self.userData = userData
+        self.primaryImageAspectRatio = primaryImageAspectRatio
+        self.imageTags = imageTags
+        self.backdropImageTags = backdropImageTags
+        self.mediaType = mediaType
+        self.collectionType = collectionType
+        self.parentId = parentId
     }
 
     static func == (lhs: BaseItemDto, rhs: BaseItemDto) -> Bool {

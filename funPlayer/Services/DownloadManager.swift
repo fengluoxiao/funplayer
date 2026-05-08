@@ -63,6 +63,14 @@ class DownloadManager: ObservableObject {
         return (try? context.fetch(descriptor)) ?? []
     }
 
+    func getDownloadedItems(forServerId serverId: String, libraryId: String) -> [DownloadItem] {
+        guard let context = modelContext else { return [] }
+        let descriptor = FetchDescriptor<DownloadItem>(
+            predicate: #Predicate { $0.serverId == serverId && $0.status == "completed" && $0.libraryId == libraryId }
+        )
+        return (try? context.fetch(descriptor)) ?? []
+    }
+
     func getDownloadedItemIds(forServerId serverId: String) -> Set<String> {
         Set(getDownloadedItems(forServerId: serverId).map(\.itemId))
     }
@@ -109,7 +117,7 @@ class DownloadManager: ObservableObject {
 
     // MARK: - Download Actions
 
-    func download(item: BaseItemDto, server: ServerConfig) {
+    func download(item: BaseItemDto, server: ServerConfig, libraryId: String? = nil) {
         let itemId = item.id
         let serverId = server.id.uuidString
 
@@ -118,9 +126,13 @@ class DownloadManager: ObservableObject {
 
         let isFavorite = item.userData?.isFavorite ?? false
 
+        // 自动推断 libraryId：优先使用传入的，其次用 AppState 中选中的第一个媒体库，最后用 parentId
+        let resolvedLibraryId = libraryId ?? AppState.shared.selectedLibraryIds.first ?? item.parentId
+
         let downloadItem = DownloadItem(
             itemId: itemId,
             serverId: serverId,
+            libraryId: resolvedLibraryId,
             name: item.name ?? "Unknown",
             artist: item.albumArtist ?? item.artists?.first,
             type: item.type,
@@ -220,16 +232,20 @@ class DownloadManager: ObservableObject {
         ToastManager.shared.show("开始下载 \"\(downloadItem.name)\"")
     }
 
-    func downloadAlbum(item: BaseItemDto, server: ServerConfig) {
+    func downloadAlbum(item: BaseItemDto, server: ServerConfig, libraryId: String? = nil) {
         let albumId = item.id
         let serverId = server.id.uuidString
 
         if activeDownloads[albumId] != nil { return }
 
+        // 自动推断 libraryId：优先使用传入的，其次用 AppState 中选中的第一个媒体库，最后用 parentId
+        let resolvedLibraryId = libraryId ?? AppState.shared.selectedLibraryIds.first ?? item.parentId
+
         // 先为专辑本身创建一个下载记录（用于跟踪专辑下载状态）
         let albumDownloadItem = DownloadItem(
             itemId: albumId,
             serverId: serverId,
+            libraryId: resolvedLibraryId,
             name: item.name ?? "Unknown Album",
             artist: item.albumArtist ?? item.artists?.first,
             type: "MusicAlbum",
@@ -294,7 +310,7 @@ class DownloadManager: ObservableObject {
                     }
 
                     // 下载单个曲目
-                    await self.downloadTrackAsync(item: track, server: server, albumId: albumId)
+                    await self.downloadTrackAsync(item: track, server: server, albumId: albumId, libraryId: libraryId)
                     completedCount += 1
 
                     // 更新专辑整体进度
@@ -333,7 +349,7 @@ class DownloadManager: ObservableObject {
         ToastManager.shared.show("开始下载专辑 \"\(albumDownloadItem.name)\"")
     }
 
-    private func downloadTrackAsync(item: BaseItemDto, server: ServerConfig, albumId: String? = nil) async {
+    private func downloadTrackAsync(item: BaseItemDto, server: ServerConfig, albumId: String? = nil, libraryId: String? = nil) async {
         let itemId = item.id
         let serverId = server.id.uuidString
 
@@ -343,9 +359,13 @@ class DownloadManager: ObservableObject {
 
         let isFavorite = item.userData?.isFavorite ?? false
 
+        // 自动推断 libraryId：优先使用传入的，其次用 AppState 中选中的第一个媒体库，最后用 parentId
+        let resolvedLibraryId = libraryId ?? AppState.shared.selectedLibraryIds.first ?? item.parentId
+
         let downloadItem = DownloadItem(
             itemId: itemId,
             serverId: serverId,
+            libraryId: resolvedLibraryId,
             name: item.name ?? "Unknown",
             artist: item.albumArtist ?? item.artists?.first,
             type: item.type,

@@ -17,10 +17,13 @@ struct MenuButton: UIViewRepresentable {
         button.overrideUserInterfaceStyle = .light
 
         let menu = UIMenu(title: "", children: menuItems.map { item in
-            UIAction(
+            var attributes: UIMenuElement.Attributes = []
+            if item.isDestructive { attributes.insert(.destructive) }
+            if item.isDisabled { attributes.insert(.disabled) }
+            return UIAction(
                 title: item.title,
                 image: UIImage(systemName: item.systemImage),
-                attributes: item.isDestructive ? .destructive : []
+                attributes: attributes
             ) { _ in
                 item.action()
             }
@@ -34,10 +37,13 @@ struct MenuButton: UIViewRepresentable {
 
     func updateUIView(_ uiView: UIButton, context: Context) {
         let menu = UIMenu(title: "", children: menuItems.map { item in
-            UIAction(
+            var attributes: UIMenuElement.Attributes = []
+            if item.isDestructive { attributes.insert(.destructive) }
+            if item.isDisabled { attributes.insert(.disabled) }
+            return UIAction(
                 title: item.title,
                 image: UIImage(systemName: item.systemImage),
-                attributes: item.isDestructive ? .destructive : []
+                attributes: attributes
             ) { _ in
                 item.action()
             }

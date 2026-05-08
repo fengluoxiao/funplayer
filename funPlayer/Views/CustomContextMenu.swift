@@ -11,7 +11,16 @@ struct CustomMenuItem: Identifiable {
     let title: String
     let systemImage: String
     let isDestructive: Bool
+    let isDisabled: Bool
     let action: () -> Void
+
+    init(title: String, systemImage: String, isDestructive: Bool = false, isDisabled: Bool = false, action: @escaping () -> Void) {
+        self.title = title
+        self.systemImage = systemImage
+        self.isDestructive = isDestructive
+        self.isDisabled = isDisabled
+        self.action = action
+    }
 }
 
 struct CustomContextMenu<Content: View>: View {
@@ -60,28 +69,31 @@ struct MenuOverlayView: View {
             VStack(spacing: 0) {
                 ForEach(Array(menuItems.enumerated()), id: \.element.id) { index, item in
                     Button {
-                        withAnimation(.easeOut(duration: 0.2)) {
-                            isPresented = false
-                        }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                            item.action()
+                        if !item.isDisabled {
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                isPresented = false
+                            }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                                item.action()
+                            }
                         }
                     } label: {
                         HStack(spacing: 12) {
                             Image(systemName: item.systemImage)
                                 .font(.system(size: 18))
-                                .foregroundStyle(item.isDestructive ? .red : .primary)
+                                .foregroundStyle(item.isDestructive ? .red : (item.isDisabled ? .secondary : .primary))
                                 .frame(width: 24)
 
                             Text(item.title)
                                 .font(.system(size: 16, weight: .regular))
-                                .foregroundStyle(item.isDestructive ? .red : .primary)
+                                .foregroundStyle(item.isDestructive ? .red : (item.isDisabled ? .secondary : .primary))
 
                             Spacer()
                         }
                         .padding(.horizontal, 16)
                         .padding(.vertical, 12)
                     }
+                    .disabled(item.isDisabled)
 
                     if index < menuItems.count - 1 {
                         Divider()

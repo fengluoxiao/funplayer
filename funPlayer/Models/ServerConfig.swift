@@ -18,6 +18,7 @@ final class ServerConfig {
     var username: String?
     var dateAdded: Date
     var selectedLibraryIds: [String]
+    var libraryNames: [String: String]
     var enableDirectPlay: Bool
     var lastAutoSwitchedURL: String?
     var showDownloadedOnly: Bool
@@ -41,6 +42,7 @@ final class ServerConfig {
         self.username = username
         self.dateAdded = Date()
         self.selectedLibraryIds = []
+        self.libraryNames = [:]
         self.enableDirectPlay = false
         self.lastAutoSwitchedURL = nil
         self.showDownloadedOnly = false

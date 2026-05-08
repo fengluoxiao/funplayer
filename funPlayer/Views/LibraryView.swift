@@ -1078,14 +1078,16 @@ struct TrackRow: View {
         let isDownloaded = downloadManager.isDownloaded(itemId: item.id, serverId: server.id.uuidString)
         let isDownloading = downloadManager.isDownloading(itemId: item.id)
         let isFav = favorites.isFavorite(itemId: item.id)
+        let showDownloadedOnly = UserDefaults.standard.bool(forKey: "showDownloadedOnly")
         print("[TrackRow] buildMenuItems for \(item.name ?? "unknown") - isDownloaded: \(isDownloaded), isDownloading: \(isDownloading), version: \(downloadManager.downloadStatusVersion.uuidString)")
 
         var items: [CustomMenuItem] = []
 
         items.append(CustomMenuItem(
             title: isFav ? "取消喜爱" : "喜爱",
-            systemImage: isFav ? "star.slash.fill" : "star.fill",
-            isDestructive: false
+            systemImage: isFav ? "heart.slash" : "heart",
+            isDestructive: false,
+            isDisabled: showDownloadedOnly
         ) {
             let appState = AppState.shared
             let type: FavoriteType = item.type == "MusicAlbum" ? .album : .track

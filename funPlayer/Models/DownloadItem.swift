@@ -19,6 +19,7 @@ final class DownloadItem {
     @Attribute(.unique) var id: String
     var itemId: String
     var serverId: String
+    var libraryId: String?
     var albumId: String?
     var name: String
     var artist: String?
@@ -39,6 +40,7 @@ final class DownloadItem {
     init(
         itemId: String,
         serverId: String,
+        libraryId: String? = nil,
         name: String,
         artist: String? = nil,
         type: String? = nil,
@@ -50,6 +52,7 @@ final class DownloadItem {
         self.id = UUID().uuidString
         self.itemId = itemId
         self.serverId = serverId
+        self.libraryId = libraryId
         self.albumId = albumId
         self.name = name
         self.artist = artist
