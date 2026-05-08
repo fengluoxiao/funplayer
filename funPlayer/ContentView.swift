@@ -156,16 +156,9 @@ struct ContentView: View {
             .tabBarMinimizeBehavior(.onScrollDown)
             .toolbarBackground(.visible, for: .tabBar)
             .tabViewBottomAccessory {
-                if player.currentItem != nil {
-                    MiniPlayerAccessoryView(systemColorScheme: colorScheme)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                                player.showFullScreenPlayer = true
-                            }
-                        }
-                        .environment(\.colorScheme, .light)
-                }
+                MiniPlayerAccessoryView(systemColorScheme: colorScheme)
+                    .contentShape(Rectangle())
+                    .environment(\.colorScheme, .light)
             }
         }
     }
@@ -1689,51 +1682,57 @@ struct InlineMiniPlayerView: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            // 专辑封面
-            Group {
-                if let image = player.currentArtwork {
-                    Image(uiImage: image)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                } else {
-                    Color.gray.opacity(0.3)
+            if let item = player.currentItem {
+                // 专辑封面
+                Group {
+                    if let image = player.currentArtwork {
+                        Image(uiImage: image)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    } else {
+                        Color.gray.opacity(0.3)
+                    }
                 }
-            }
-            .frame(width: 32, height: 32)
-            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .frame(width: 32, height: 32)
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
 
-            // 歌曲信息
-            VStack(alignment: .leading, spacing: 2) {
-                Text(player.currentItem?.name ?? "Not Playing")
+                // 歌曲信息
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.name ?? "")
+                        .font(.caption.weight(.medium))
+                        .foregroundColor(appState.isInAlbumDetail ? .black : (systemColorScheme == .dark ? .white : .black))
+                        .lineLimit(1)
+                    Text(artistText(for: item))
+                        .font(.caption2)
+                        .foregroundColor(appState.isInAlbumDetail ? .black.opacity(0.6) : (systemColorScheme == .dark ? .white.opacity(0.7) : .black.opacity(0.6)))
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                // 播放按钮
+                Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                    .font(.body)
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 36, height: 44)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        player.togglePlayPause()
+                    }
+            } else {
+                Text("未在播放")
                     .font(.caption.weight(.medium))
-                    .foregroundColor(appState.isInAlbumDetail ? .black : (systemColorScheme == .dark ? .white : .black))
-                    .lineLimit(1)
-                Text(artistText())
-                    .font(.caption2)
-                    .foregroundColor(appState.isInAlbumDetail ? .black.opacity(0.6) : (systemColorScheme == .dark ? .white.opacity(0.7) : .black.opacity(0.6)))
-                    .lineLimit(1)
+                    .foregroundStyle(.secondary)
+                Spacer()
             }
-
-            Spacer()
-
-            // 播放按钮
-            Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                .font(.body)
-                .foregroundStyle(Color.accentColor)
-                .frame(width: 36, height: 44)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    player.togglePlayPause()
-                }
         }
         .padding(.leading, 16)
         .padding(.trailing, 4)
         .frame(height: 60)
     }
 
-    private func artistText() -> String {
-        guard let item = player.currentItem else { return "" }
-        return item.albumArtist ?? item.artists?.first ?? item.album ?? ""
+    private func artistText(for item: BaseItemDto) -> String {
+        item.albumArtist ?? item.artists?.first ?? item.album ?? ""
     }
 }
 
@@ -1744,52 +1743,59 @@ struct ExpandedMiniPlayerView: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            // 专辑封面
-            Group {
-                if let image = player.currentArtwork {
-                    Image(uiImage: image)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                } else {
-                    Color.gray.opacity(0.3)
+            if let item = player.currentItem {
+                // 专辑封面
+                Group {
+                    if let image = player.currentArtwork {
+                        Image(uiImage: image)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    } else {
+                        Color.gray.opacity(0.3)
+                    }
                 }
-            }
-            .frame(width: 32, height: 32)
-            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .frame(width: 32, height: 32)
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
 
-            // 歌曲信息
-            VStack(alignment: .leading, spacing: 2) {
-                Text(player.currentItem?.name ?? "Not Playing")
+                // 歌曲信息
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.name ?? "")
+                        .font(.caption.weight(.medium))
+                        .foregroundColor(appState.isInAlbumDetail ? .black : (systemColorScheme == .dark ? .white : .black))
+                        .lineLimit(1)
+                    Text(artistText(for: item))
+                        .font(.caption2)
+                        .foregroundColor(appState.isInAlbumDetail ? .black.opacity(0.6) : (systemColorScheme == .dark ? .white.opacity(0.7) : .black.opacity(0.6)))
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                // 播放控制
+                HStack(spacing: 0) {
+                    Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                        .font(.title3)
+                        .foregroundStyle(Color.accentColor)
+                        .frame(width: 40, height: 44)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            player.togglePlayPause()
+                        }
+
+                    Image(systemName: "forward.fill")
+                        .font(.body)
+                        .foregroundStyle(Color.accentColor)
+                        .frame(width: 36, height: 44)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            player.nextTrack()
+                        }
+                }
+            } else {
+                Text("未在播放")
                     .font(.caption.weight(.medium))
-                    .foregroundColor(appState.isInAlbumDetail ? .black : (systemColorScheme == .dark ? .white : .black))
-                    .lineLimit(1)
-                Text(artistText())
-                    .font(.caption2)
-                    .foregroundColor(appState.isInAlbumDetail ? .black.opacity(0.6) : (systemColorScheme == .dark ? .white.opacity(0.7) : .black.opacity(0.6)))
-                    .lineLimit(1)
-            }
-
-            Spacer()
-
-            // 播放控制
-            HStack(spacing: 0) {
-                Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                    .font(.title3)
-                    .foregroundStyle(Color.accentColor)
-                    .frame(width: 40, height: 44)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        player.togglePlayPause()
-                    }
-
-                Image(systemName: "forward.fill")
-                    .font(.body)
-                    .foregroundStyle(Color.accentColor)
-                    .frame(width: 36, height: 44)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        player.nextTrack()
-                    }
+                    .foregroundStyle(.secondary)
+                Spacer()
             }
         }
         .padding(.leading, 12)
@@ -1799,8 +1805,7 @@ struct ExpandedMiniPlayerView: View {
         .padding(.horizontal, 16)
     }
 
-    private func artistText() -> String {
-        guard let item = player.currentItem else { return "" }
-        return item.albumArtist ?? item.artists?.first ?? item.album ?? ""
+    private func artistText(for item: BaseItemDto) -> String {
+        item.albumArtist ?? item.artists?.first ?? item.album ?? ""
     }
 }

@@ -633,7 +633,7 @@ struct AlbumTrackListView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 if let item = albumItem {
                     let isFav = favorites.isFavorite(itemId: item.id)
-                    let showDownloadedOnly = appState.selectedServer?.showDownloadedOnly ?? false
+                    let showDownloadedOnly = UserDefaults.standard.bool(forKey: "showDownloadedOnly")
                     Button {
                         favorites.toggleFavorite(item: item, server: server, libraryIds: appState.selectedLibraryIds, type: .album)
                     } label: {
@@ -647,7 +647,7 @@ struct AlbumTrackListView: View {
             }
             ToolbarItem(placement: .topBarTrailing) {
                 if let item = albumItem {
-                    let showDownloadedOnly = appState.selectedServer?.showDownloadedOnly ?? false
+                    let showDownloadedOnly = UserDefaults.standard.bool(forKey: "showDownloadedOnly")
                     AlbumDownloadButton(item: item, server: server, onDelete: {
                         if showDownloadedOnly {
                             if !path.isEmpty {
@@ -678,7 +678,7 @@ struct AlbumTrackListView: View {
 
     private func loadAlbumTracks() async {
         isLoading = true
-        let showDownloadedOnly = appState.selectedServer?.showDownloadedOnly ?? false
+        let showDownloadedOnly = UserDefaults.standard.bool(forKey: "showDownloadedOnly")
         if showDownloadedOnly {
             await loadLocalAlbumTracks()
             await loadLocalAccentColor()
@@ -878,7 +878,7 @@ struct AlbumTrackListView: View {
                             item: item,
                             server: server,
                             onDelete: {
-                                let showDownloadedOnly = appState.selectedServer?.showDownloadedOnly ?? false
+                                let showDownloadedOnly = UserDefaults.standard.bool(forKey: "showDownloadedOnly")
                                 if showDownloadedOnly {
                                     // 直接从列表中移除该项
                                     items.removeAll { $0.id == item.id }

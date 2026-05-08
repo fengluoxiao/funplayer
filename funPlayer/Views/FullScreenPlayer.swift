@@ -132,7 +132,7 @@ struct FullScreenPlayer: View {
     @ViewBuilder
     private func favoriteButton() -> some View {
         let isFav = favorites.isFavorite(itemId: player.currentItem?.id ?? "")
-        let showDownloadedOnly = AppState.shared.selectedServer?.showDownloadedOnly ?? false
+        let showDownloadedOnly = UserDefaults.standard.bool(forKey: "showDownloadedOnly")
         Button {
             guard let item = player.currentItem, let server = player.currentServer else { return }
             let appState = AppState.shared

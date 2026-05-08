@@ -11,31 +11,41 @@ struct MiniPlayer: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            // 直接使用 player.currentArtwork，避免 View 重建丢失
-            Group {
-                if let image = player.currentArtwork {
-                    Image(uiImage: image)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .clipped()
-                } else {
-                    Color.gray.opacity(0.3)
+            if let item = player.currentItem {
+                // 有播放内容时显示正常界面
+                Group {
+                    if let image = player.currentArtwork {
+                        Image(uiImage: image)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .clipped()
+                    } else {
+                        Color.gray.opacity(0.3)
+                    }
                 }
+                .frame(width: 40, height: 40)
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .padding(.leading, 12)
+
+                TrackInfoView()
+
+                Spacer()
+
+                PlaybackControlsView()
+            } else {
+                // 没有播放内容时显示提示
+                Text("未在播放")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 16)
+                Spacer()
             }
-            .frame(width: 40, height: 40)
-            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-            .padding(.leading, 12)
-
-            TrackInfoView()
-
-            Spacer()
-
-            PlaybackControlsView()
         }
         .frame(height: 60)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .contentShape(Rectangle())
         .onTapGesture {
+            guard player.currentItem != nil else { return }
             withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                 player.showFullScreenPlayer = true
             }

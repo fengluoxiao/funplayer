@@ -145,9 +145,7 @@ struct SearchTabView: View {
     @StateObject private var player = PlayerManager.shared
     @StateObject private var downloadManager = DownloadManager.shared
 
-    private var isOfflineMode: Bool {
-        appState.selectedServer?.showDownloadedOnly ?? false
-    }
+    @AppStorage("showDownloadedOnly") private var isOfflineMode = false
 
     private let searchSubject = PassthroughSubject<String, Never>()
 
