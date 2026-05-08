@@ -43,9 +43,10 @@ struct ToastOverlay: View {
     @StateObject private var player = PlayerManager.shared
 
     private var bottomPadding: CGFloat {
-        let basePadding: CGFloat = 100
-        let miniPlayerHeight: CGFloat = 64
-        return player.currentItem != nil ? basePadding + miniPlayerHeight : basePadding
+        let basePadding: CGFloat = 20
+        let miniPlayerHeight: CGFloat = 60
+        let tabBarHeight: CGFloat = 49
+        return player.currentItem != nil ? basePadding + miniPlayerHeight + tabBarHeight : basePadding
     }
 
     var body: some View {
@@ -85,8 +86,8 @@ struct ToastMessageView: View {
             .foregroundStyle(textColor)
             .padding(.horizontal, 20)
             .padding(.vertical, 12)
-            .background(.ultraThinMaterial, in: Capsule())
-            .transition(.move(edge: .bottom).combined(with: .opacity))
+            .glassEffect(.regular, in: Capsule())
+            .transition(.asymmetric(insertion: .move(edge: .bottom), removal: .opacity))
             .padding(.bottom, bottomPadding)
     }
 }
