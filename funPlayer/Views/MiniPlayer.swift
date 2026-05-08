@@ -59,7 +59,7 @@ private struct TrackInfoView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(player.currentItem?.name ?? "Not Playing")
+            Text(player.currentItem?.name ?? "未在播放")
                 .font(.subheadline.weight(.medium))
                 .lineLimit(1)
             Text(artistText())

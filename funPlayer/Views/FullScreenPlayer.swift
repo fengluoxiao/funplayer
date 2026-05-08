@@ -40,20 +40,22 @@ struct FullScreenPlayer: View {
             }
         }
         .popupItem {
-            PopupItem(id: player.currentItem?.id ?? "noItem", title: player.currentItem?.name ?? "Not Playing", subtitle: artistText(), image: popupBarImage()) {
+            PopupItem(id: player.currentItem?.id ?? "noItem", title: player.currentItem?.name ?? "未在播放", subtitle: artistText(), image: popupBarImage()) {
                 ToolbarItemGroup(placement: .popupBar) {
-                    Button {
-                        player.togglePlayPause()
-                    } label: {
-                        Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                    }
-                    .frame(minWidth: popupBarPlacement == .inline ? nil : 30)
-
-                    if popupBarPlacement != .inline {
+                    if player.currentItem != nil {
                         Button {
-                            player.nextTrack()
+                            player.togglePlayPause()
                         } label: {
-                            Image(systemName: "forward.fill")
+                            Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                        }
+                        .frame(minWidth: popupBarPlacement == .inline ? nil : 30)
+
+                        if popupBarPlacement != .inline {
+                            Button {
+                                player.nextTrack()
+                            } label: {
+                                Image(systemName: "forward.fill")
+                            }
                         }
                     }
                 }
@@ -156,10 +158,12 @@ struct FullScreenPlayer: View {
     private func controlPanel() -> some View {
         VStack(spacing: 20) {
             songInfoView()
-            progressView()
-            playbackControlsView()
-            volumeView()
-            extraControlsView()
+            if player.currentItem != nil {
+                progressView()
+                playbackControlsView()
+                volumeView()
+                extraControlsView()
+            }
         }
     }
 

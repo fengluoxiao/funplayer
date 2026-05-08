@@ -46,7 +46,7 @@ struct ToastOverlay: View {
         let basePadding: CGFloat = 20
         let miniPlayerHeight: CGFloat = 60
         let tabBarHeight: CGFloat = 49
-        return player.currentItem != nil ? basePadding + miniPlayerHeight + tabBarHeight : basePadding
+        return basePadding + miniPlayerHeight + tabBarHeight
     }
 
     var body: some View {

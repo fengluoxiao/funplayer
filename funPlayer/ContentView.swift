@@ -153,10 +153,7 @@ struct ContentView: View {
             }
             .tabBarMinimizeBehavior(.onScrollDown)
             .toolbarBackground(.visible, for: .tabBar)
-            .popup(isBarPresented: Binding(
-                get: { player.currentItem != nil },
-                set: { _ in }
-            ), isPopupOpen: $player.showFullScreenPlayer) {
+            .popup(isBarPresented: .constant(true), isPopupOpen: $player.showFullScreenPlayer) {
                 FullScreenPlayer()
             }
             .popupBarStyle(.floatingCompact)
@@ -166,11 +163,32 @@ struct ContentView: View {
             .popupBarCustomizer { popupBar in
                 popupBar.overrideUserInterfaceStyle = .light
             }
+            .onReceive(player.$currentItem) { newItem in
+                DispatchQueue.main.async {
+                    for scene in UIApplication.shared.connectedScenes {
+                        guard let windowScene = scene as? UIWindowScene else { continue }
+                        for window in windowScene.windows {
+                            setPopupBarEnabled(in: window, enabled: newItem != nil)
+                        }
+                    }
+                }
+            }
         }
     }
 }
 
 // MARK: - Welcome View
+
+@MainActor
+func setPopupBarEnabled(in view: UIView, enabled: Bool) {
+    let className = String(describing: type(of: view))
+    if className.contains("PopupBar") {
+        view.isUserInteractionEnabled = enabled
+    }
+    for subview in view.subviews {
+        setPopupBarEnabled(in: subview, enabled: enabled)
+    }
+}
 
 struct WelcomeView: View {
     @Binding var showAddServer: Bool
@@ -1384,6 +1402,7 @@ struct SettingsTabView: View {
     @Environment(\.modelContext) private var modelContext
     @StateObject private var appState = AppState.shared
     @StateObject private var client = JellyfinClient()
+    @StateObject private var speedTestService = ServerSpeedTestService()
     @State private var libraries: [BaseItemDto] = []
     @State private var isLoadingLibraries = false
     @State private var editingServer: ServerConfig?
@@ -1400,6 +1419,16 @@ struct SettingsTabView: View {
         .sheet(item: $editingServer) { server in
             ServerSetupView(showAddServer: .constant(false), editingServer: server)
         }
+        .sheet(item: $speedTestServer) { server in
+            SpeedTestResultView(service: speedTestService, server: server)
+        }
+        .onChange(of: speedTestServer) { oldValue, newValue in
+            if let server = newValue {
+                Task {
+                    await speedTestService.testServer(server)
+                }
+            }
+        }
     }
 
     private var settingsList: some View {
@@ -1414,6 +1443,7 @@ struct SettingsTabView: View {
                 servers: servers,
                 selectedServerId: appState.selectedServer?.id,
                 showAddServer: $showAddServer,
+                speedTestServer: $speedTestServer,
                 onSelect: { appState.selectServer($0) },
                 onDelete: deleteServer
             )
@@ -1430,8 +1460,7 @@ struct SettingsTabView: View {
                     server: server,
                     showDownloadedOnly: $showDownloadedOnly,
                     allowDirectPlay: $allowDirectPlay,
-                    showDirectPlayAlert: $showDirectPlayAlert,
-                    speedTestServer: $speedTestServer
+                    showDirectPlayAlert: $showDirectPlayAlert
                 )
             }
 
@@ -1454,6 +1483,11 @@ struct SettingsTabView: View {
                 await loadLibraries()
             }
         }
+        .onChange(of: showDownloadedOnly) {
+            Task {
+                await loadLibraries()
+            }
+        }
     }
 
     private func deleteServer(at offsets: IndexSet) {
@@ -1468,8 +1502,6 @@ struct SettingsTabView: View {
     }
 
     private func loadLibraries() async {
-        let showDownloadedOnly = UserDefaults.standard.bool(forKey: "showDownloadedOnly")
-
         // 离线模式下，显示所有保存的媒体库（包括未勾选的）
         if showDownloadedOnly {
             guard let server = appState.selectedServer else {
@@ -1534,27 +1566,27 @@ struct ServerRow: View {
     let onSelect: () -> Void
 
     var body: some View {
-        Button(action: onSelect) {
-            HStack(spacing: 12) {
-                ServerIcon(isAuthenticated: server.isAuthenticated, size: 40, iconSize: 18)
+        HStack(spacing: 12) {
+            ServerIcon(isAuthenticated: server.isAuthenticated, size: 40, iconSize: 18)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(server.name)
-                        .font(.system(size: 16))
-                    Text(server.currentURL)
-                        .font(.system(size: 13))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(server.name)
+                    .font(.system(size: 16))
+                Text(server.currentURL)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
 
-                Spacer()
+            Spacer()
 
-                if isSelected {
-                    Image(systemName: "checkmark")
-                        .foregroundStyle(Color.accentColor)
-                }
+            if isSelected {
+                Image(systemName: "checkmark")
+                    .foregroundStyle(Color.accentColor)
             }
         }
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onSelect)
     }
 }
 
@@ -1651,7 +1683,6 @@ struct PlaybackSettingsSection: View {
     @Binding var showDownloadedOnly: Bool
     @Binding var allowDirectPlay: Bool
     @Binding var showDirectPlayAlert: Bool
-    @Binding var speedTestServer: ServerConfig?
     @AppStorage("playback_auto_restore") private var autoRestorePlayback = true
 
     var body: some View {
@@ -1662,7 +1693,6 @@ struct PlaybackSettingsSection: View {
                     Text("离线模式")
                 }
             }
-            .disabled(true)
 
             Toggle(isOn: $allowDirectPlay) {
                 HStack {
@@ -1686,10 +1716,6 @@ struct PlaybackSettingsSection: View {
                     Image(systemName: "clock.arrow.circlepath")
                     Text("自动恢复播放")
                 }
-            }
-
-            if server.allURLs.count > 1 {
-                SpeedTestButton(server: server, speedTestServer: $speedTestServer)
             }
         }
     }
@@ -1769,6 +1795,8 @@ struct ServerListSection: View {
     let servers: [ServerConfig]
     let selectedServerId: UUID?
     @Binding var showAddServer: Bool
+    @Binding var speedTestServer: ServerConfig?
+    @Environment(\.modelContext) private var modelContext
     let onSelect: (ServerConfig) -> Void
     let onDelete: (IndexSet) -> Void
 
@@ -1780,10 +1808,44 @@ struct ServerListSection: View {
                     isSelected: selectedServerId == server.id,
                     onSelect: { onSelect(server) }
                 )
+                .contextMenu {
+                    if server.allURLs.count > 1 {
+                        Button {
+                            speedTestServer = server
+                        } label: {
+                            Label("测速", systemImage: "wifi")
+                        }
+                        Button {
+                            autoSwitchServer(server)
+                        } label: {
+                            Label("自动切换最佳地址", systemImage: "arrow.left.arrow.right")
+                        }
+                    }
+                }
             }
             .onDelete(perform: onDelete)
 
             AddServerButton(showAddServer: $showAddServer)
+        }
+    }
+
+    private func autoSwitchServer(_ server: ServerConfig) {
+        Task {
+            let service = ServerSpeedTestService()
+            let result = await service.autoSwitchBestURLWithTimeout(for: server, timeout: 10)
+            guard let result = result else {
+                ToastManager.shared.show("所有地址均不可用")
+                return
+            }
+            if result.didSwitch {
+                let newURL = server.allURLs[result.bestIndex]
+                server.setCurrentURL(index: result.bestIndex)
+                server.lastAutoSwitchedURL = newURL
+                try? modelContext.save()
+                ToastManager.shared.show("已切换到最佳地址: \(newURL)")
+            } else {
+                ToastManager.shared.show("当前地址已是最优")
+            }
         }
     }
 }
@@ -1864,7 +1926,6 @@ struct InlineMiniPlayerView: View {
         .frame(height: 60)
         .contentShape(Rectangle())
         .onTapGesture {
-            guard player.currentItem != nil else { return }
             withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                 player.showFullScreenPlayer = true
             }
@@ -1945,7 +2006,6 @@ struct ExpandedMiniPlayerView: View {
         .padding(.horizontal, 16)
         .contentShape(Rectangle())
         .onTapGesture {
-            guard player.currentItem != nil else { return }
             withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                 player.showFullScreenPlayer = true
             }
