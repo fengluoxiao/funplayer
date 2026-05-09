@@ -619,6 +619,7 @@ struct LibraryTabView: View {
     @State private var isLoading = true
     @State private var path = NavigationPath()
     @State private var selectedAlbumId: String?
+    @State private var playlistsCount: Int = 0
 
     @AppStorage("showDownloadedOnly") private var showDownloadedOnly = false
 
@@ -796,8 +797,25 @@ struct LibraryTabView: View {
                 forServerId: server.id.uuidString,
                 libraryIds: appState.selectedLibraryIds
             ).count
+        case .playlists:
+            return playlistsCount
         default:
             return itemsForCategory(category).count
+        }
+    }
+
+    private func loadPlaylistsCount() async {
+        guard let server = appState.selectedServer, server.isAuthenticated else {
+            playlistsCount = 0
+            return
+        }
+        let client = JellyfinClient()
+        client.serverConfig = server
+        do {
+            let playlists = try await client.getPlaylists()
+            playlistsCount = playlists.count
+        } catch {
+            playlistsCount = 0
         }
     }
 
@@ -1013,6 +1031,8 @@ struct LibraryTabView: View {
             print("[LibraryTabView] Error loading items: \(error)")
         }
         isLoading = false
+
+        await loadPlaylistsCount()
     }
 }
 
@@ -1238,6 +1258,8 @@ struct LibraryCategoryView: View {
         Group {
             if category == .favorites {
                 FavoritesView(server: server, path: $path)
+            } else if category == .playlists {
+                PlaylistsView(server: server, path: $path)
             } else if items.isEmpty {
                 ContentUnavailableView(
                     "没有\(category.rawValue)",
@@ -1455,6 +1477,16 @@ struct SettingsTabView: View {
                     appState: appState,
                     modelContext: modelContext
                 )
+
+                Section(String(localized: "下载管理")) {
+                    NavigationLink(destination: DownloadsView(path: $path)) {
+                        HStack {
+                            Image(systemName: "arrow.down.circle")
+                                .foregroundStyle(Color.accentColor)
+                            Text("下载管理")
+                        }
+                    }
+                }
 
                 PlaybackSettingsSection(
                     server: server,
@@ -1684,6 +1716,10 @@ struct PlaybackSettingsSection: View {
     @Binding var allowDirectPlay: Bool
     @Binding var showDirectPlayAlert: Bool
     @AppStorage("playback_auto_restore") private var autoRestorePlayback = true
+    @AppStorage("enableUpmix51") private var enableUpmix51 = false
+    @AppStorage("enableVolumeBalance") private var enableVolumeBalance = false
+    @State private var showUpmixAlert = false
+    @State private var showVolumeBalanceAlert = false
 
     var body: some View {
         Section(String(localized: "播放设置")) {
@@ -1709,6 +1745,45 @@ struct PlaybackSettingsSection: View {
                 Button("确定", role: .cancel) {}
             } message: {
                 Text("直接播放可能在网络不稳定时导致播放卡顿，建议在局域网环境下使用。")
+            }
+
+            Toggle(isOn: $enableUpmix51) {
+                HStack {
+                    Image(systemName: "speaker.wave.3")
+                    Text("立体声上混7.1.2")
+                }
+            }
+            .onChange(of: enableUpmix51) {
+                if enableUpmix51 {
+                    showUpmixAlert = true
+                } else {
+                    PlayerManager.shared.disableUpmixAndRestart()
+                }
+            }
+            .alert("立体声上混7.1.2", isPresented: $showUpmixAlert) {
+                Button("确定", role: .cancel) {}
+            } message: {
+                Text("将立体声实时上混为 7.1.2 声道，纯内存处理零文件。系统自动路由到最佳输出。")
+            }
+
+            if enableUpmix51 {
+                Toggle(isOn: $enableVolumeBalance) {
+                    HStack {
+                        Image(systemName: "slider.horizontal.3")
+                        Text("音量平衡")
+                    }
+                }
+                .onChange(of: enableVolumeBalance) {
+                    PlayerManager.shared.applyVolumeBalance()
+                    if enableVolumeBalance {
+                        showVolumeBalanceAlert = true
+                    }
+                }
+                .alert("音量平衡", isPresented: $showVolumeBalanceAlert) {
+                    Button("确定", role: .cancel) {}
+                } message: {
+                    Text("将上混音量降低约 -10dB，与杜比全景声 (-18 LUFS) 响度标准保持一致。")
+                }
             }
 
             Toggle(isOn: $autoRestorePlayback) {

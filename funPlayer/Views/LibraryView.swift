@@ -6,6 +6,73 @@
 import SwiftUI
 import UIKit
 
+func extractDominantColor(from image: UIImage) -> Color? {
+    guard let cgImage = image.cgImage else { return nil }
+    let width = 64
+    let height = 64
+    let bitsPerComponent = 8
+    let bytesPerRow = width * 4
+    let colorSpace = CGColorSpaceCreateDeviceRGB()
+    let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
+
+    guard let context = CGContext(
+        data: nil,
+        width: width,
+        height: height,
+        bitsPerComponent: bitsPerComponent,
+        bytesPerRow: bytesPerRow,
+        space: colorSpace,
+        bitmapInfo: bitmapInfo
+    ) else { return nil }
+
+    context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+    guard let data = context.data else { return nil }
+    let pixels = data.bindMemory(to: UInt8.self, capacity: width * height * 4)
+
+    var r: CGFloat = 0
+    var g: CGFloat = 0
+    var b: CGFloat = 0
+    var count: CGFloat = 0
+
+    for y in 0..<height {
+        for x in 0..<width {
+            let offset = (y * width + x) * 4
+            let pr = CGFloat(pixels[offset]) / 255.0
+            let pg = CGFloat(pixels[offset + 1]) / 255.0
+            let pb = CGFloat(pixels[offset + 2]) / 255.0
+
+            let brightness = (pr + pg + pb) / 3.0
+            if brightness > 0.15 && brightness < 0.85 {
+                r += pr
+                g += pg
+                b += pb
+                count += 1
+            }
+        }
+    }
+
+    guard count > 0 else { return nil }
+    var red = r / count
+    var green = g / count
+    var blue = b / count
+
+    var hue: CGFloat = 0
+    var saturation: CGFloat = 0
+    var brightness: CGFloat = 0
+    var alpha: CGFloat = 0
+    UIColor(red: red, green: green, blue: blue, alpha: 1.0)
+        .getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &alpha)
+
+    saturation = min(saturation * 1.5, 1.0)
+    brightness = max(brightness * 0.55, 0.25)
+
+    let vibrant = UIColor(hue: hue, saturation: saturation, brightness: brightness, alpha: alpha)
+    vibrant.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+
+    return Color(red: Double(red), green: Double(green), blue: Double(blue))
+}
+
 struct CombinedLibraryView: View {
     let server: ServerConfig
     let libraryIds: [String]
@@ -648,6 +715,24 @@ struct AlbumTrackListView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 if let item = albumItem {
                     let showDownloadedOnly = UserDefaults.standard.bool(forKey: "showDownloadedOnly")
+                    Menu {
+                        Button {
+                            // TODO: Add album to playlist
+                            ToastManager.shared.show("功能开发中")
+                        } label: {
+                            Label("添加到播放列表", systemImage: "text.badge.plus")
+                        }
+                        .disabled(showDownloadedOnly)
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .font(.system(size: 20, weight: .semibold))
+                    }
+                    .disabled(showDownloadedOnly)
+                }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                if let item = albumItem {
+                    let showDownloadedOnly = UserDefaults.standard.bool(forKey: "showDownloadedOnly")
                     AlbumDownloadButton(item: item, server: server, onDelete: {
                         if showDownloadedOnly {
                             if !path.isEmpty {
@@ -993,72 +1078,6 @@ struct AlbumTrackListView: View {
         }
     }
 
-    private func extractDominantColor(from image: UIImage) -> Color? {
-        guard let cgImage = image.cgImage else { return nil }
-        let width = 64
-        let height = 64
-        let bitsPerComponent = 8
-        let bytesPerRow = width * 4
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
-
-        guard let context = CGContext(
-            data: nil,
-            width: width,
-            height: height,
-            bitsPerComponent: bitsPerComponent,
-            bytesPerRow: bytesPerRow,
-            space: colorSpace,
-            bitmapInfo: bitmapInfo
-        ) else { return nil }
-
-        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
-
-        guard let data = context.data else { return nil }
-        let pixels = data.bindMemory(to: UInt8.self, capacity: width * height * 4)
-
-        var r: CGFloat = 0
-        var g: CGFloat = 0
-        var b: CGFloat = 0
-        var count: CGFloat = 0
-
-        for y in 0..<height {
-            for x in 0..<width {
-                let offset = (y * width + x) * 4
-                let pr = CGFloat(pixels[offset]) / 255.0
-                let pg = CGFloat(pixels[offset + 1]) / 255.0
-                let pb = CGFloat(pixels[offset + 2]) / 255.0
-
-                let brightness = (pr + pg + pb) / 3.0
-                if brightness > 0.15 && brightness < 0.85 {
-                    r += pr
-                    g += pg
-                    b += pb
-                    count += 1
-                }
-            }
-        }
-
-        guard count > 0 else { return nil }
-        var red = r / count
-        var green = g / count
-        var blue = b / count
-
-        var hue: CGFloat = 0
-        var saturation: CGFloat = 0
-        var brightness: CGFloat = 0
-        var alpha: CGFloat = 0
-        UIColor(red: red, green: green, blue: blue, alpha: 1.0)
-            .getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &alpha)
-
-        saturation = min(saturation * 1.5, 1.0)
-        brightness = max(brightness * 0.55, 0.25)
-
-        let vibrant = UIColor(hue: hue, saturation: saturation, brightness: brightness, alpha: alpha)
-        vibrant.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
-
-        return Color(red: Double(red), green: Double(green), blue: Double(blue))
-    }
 }
 
 struct TrackRow: View {

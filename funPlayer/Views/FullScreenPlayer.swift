@@ -100,7 +100,7 @@ struct FullScreenPlayer: View {
                                 player.playCurrentItem()
                             }
                         } label: {
-                            PlaylistRow(
+                            FullScreenPlaylistRow(
                                 index: index + 1,
                                 title: item.name ?? "未知",
                                 artist: item.artists?.first ?? item.albumArtist ?? "",
@@ -304,7 +304,14 @@ struct FullScreenPlayer: View {
                     .foregroundStyle(player.repeatMode != .off ? accentColor : .gray)
                     .frame(maxWidth: .infinity)
             }
-            Button {} label: {
+            Menu {
+                Button {
+                    // TODO: Add to playlist
+                    ToastManager.shared.show("功能开发中")
+                } label: {
+                    Label("添加到播放列表", systemImage: "text.badge.plus")
+                }
+            } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 20))
                     .foregroundStyle(accentColor)
@@ -441,7 +448,7 @@ struct FullScreenPlayer: View {
 
 }
 
-struct PlaylistRow: View {
+struct FullScreenPlaylistRow: View {
     let index: Int
     let title: String
     let artist: String

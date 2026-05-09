@@ -360,4 +360,59 @@ class JellyfinClient: ObservableObject {
         let result = try JSONDecoder().decode(BaseItemDtoQueryResult.self, from: data)
         return result.items ?? []
     }
+
+    // MARK: - Playlists
+
+    func getPlaylists() async throws -> [BaseItemDto] {
+        guard let userId = serverConfig?.userId else { throw JellyfinError.authenticationFailed }
+        var components = URLComponents(url: baseURL!.appendingPathComponent("/Users/\(userId)/Items"), resolvingAgainstBaseURL: true)!
+        let queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "IncludeItemTypes", value: "Playlist"),
+            URLQueryItem(name: "Recursive", value: "true"),
+            URLQueryItem(name: "SortBy", value: "SortName"),
+            URLQueryItem(name: "SortOrder", value: "Ascending"),
+            URLQueryItem(name: "Fields", value: "PrimaryImageAspectRatio,BasicSyncInfo,CanDelete,MediaSourceCount"),
+            URLQueryItem(name: "ImageTypeLimit", value: "1"),
+            URLQueryItem(name: "EnableImageTypes", value: "Primary,Backdrop,Thumb")
+        ]
+        components.queryItems = queryItems
+
+        guard let url = components.url else { throw JellyfinError.invalidURL }
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let token = serverConfig?.accessToken {
+            req.setValue("MediaBrowser Token=\"\(token)\", Client=\"funPlayer\", Device=\"iOS\", DeviceId=\"\(deviceId)\", Version=\"1.0\"", forHTTPHeaderField: "Authorization")
+        }
+
+        let (data, response) = try await session.data(for: req)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { throw JellyfinError.invalidResponse }
+        let result = try JSONDecoder().decode(BaseItemDtoQueryResult.self, from: data)
+        return result.items ?? []
+    }
+
+    func getPlaylistItems(playlistId: String) async throws -> [BaseItemDto] {
+        guard let userId = serverConfig?.userId else { throw JellyfinError.authenticationFailed }
+        var components = URLComponents(url: baseURL!.appendingPathComponent("/Playlists/\(playlistId)/Items"), resolvingAgainstBaseURL: true)!
+        let queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "UserId", value: userId),
+            URLQueryItem(name: "Fields", value: "PrimaryImageAspectRatio,BasicSyncInfo,CanDelete,MediaSourceCount"),
+            URLQueryItem(name: "ImageTypeLimit", value: "1"),
+            URLQueryItem(name: "EnableImageTypes", value: "Primary,Backdrop,Thumb")
+        ]
+        components.queryItems = queryItems
+
+        guard let url = components.url else { throw JellyfinError.invalidURL }
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let token = serverConfig?.accessToken {
+            req.setValue("MediaBrowser Token=\"\(token)\", Client=\"funPlayer\", Device=\"iOS\", DeviceId=\"\(deviceId)\", Version=\"1.0\"", forHTTPHeaderField: "Authorization")
+        }
+
+        let (data, response) = try await session.data(for: req)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { throw JellyfinError.invalidResponse }
+        let result = try JSONDecoder().decode(BaseItemDtoQueryResult.self, from: data)
+        return result.items ?? []
+    }
 }

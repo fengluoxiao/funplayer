@@ -11,6 +11,7 @@
 		215545792F9E4B7E004C065D /* LNPopupUI-Static in Frameworks */ = {isa = PBXBuildFile; productRef = 215545782F9E4B7E004C065D /* LNPopupUI-Static */; };
 		21632F1C2FA123FB0066AD4E /* (null) in Frameworks */ = {isa = PBXBuildFile; };
 		21632F1E2FA123FB0066AD4E /* (null) in Frameworks */ = {isa = PBXBuildFile; };
+		216872852FAF8A0800A6006A /* FFmpeg-iOS in Frameworks */ = {isa = PBXBuildFile; productRef = 216872842FAF8A0800A6006A /* FFmpeg-iOS */; };
 		216EEDC02F9D3316004DEA56 /* AVFAudio.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 216EEDBE2F9D3313004DEA56 /* AVFAudio.framework */; };
 		216EEDC32F9D3317004DEA56 /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 216EEDBA2F9D3301004DEA56 /* AVFoundation.framework */; };
 		216EEDC52F9D3319004DEA56 /* AVKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 216EEDBC2F9D330C004DEA56 /* AVKit.framework */; };
@@ -43,6 +44,7 @@
 				214E46CD2F9DA07D006793F2 /* AVRouting.framework in Frameworks */,
 				216EEDC52F9D3319004DEA56 /* AVKit.framework in Frameworks */,
 				21632F1E2FA123FB0066AD4E /* (null) in Frameworks */,
+				216872852FAF8A0800A6006A /* FFmpeg-iOS in Frameworks */,
 			);
 		};
 /* End PBXFrameworksBuildPhase section */
@@ -95,6 +97,7 @@
 			name = funPlayer;
 			packageProductDependencies = (
 				215545782F9E4B7E004C065D /* LNPopupUI-Static */,
+				216872842FAF8A0800A6006A /* FFmpeg-iOS */,
 			);
 			productName = funPlayer;
 			productReference = 216EECC22F9D1465004DEA56 /* funPlayer.app */;
@@ -126,6 +129,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				215545752F9E4B7E004C065D /* XCRemoteSwiftPackageReference "LNPopupUI" */,
+				216872832FAF8A0800A6006A /* XCRemoteSwiftPackageReference "FFmpeg-iOS" */,
 			);
 			preferredProjectObjectVersion = 100;
 			productRefGroup = 216EECC32F9D1465004DEA56 /* Products */;
@@ -376,6 +380,14 @@
 				minimumVersion = 3.0.2;
 			};
 		};
+		216872832FAF8A0800A6006A /* XCRemoteSwiftPackageReference "FFmpeg-iOS" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/kewlbear/FFmpeg-iOS.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = "0.0.6-b";
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -383,6 +395,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 215545752F9E4B7E004C065D /* XCRemoteSwiftPackageReference "LNPopupUI" */;
 			productName = "LNPopupUI-Static";
+		};
+		216872842FAF8A0800A6006A /* FFmpeg-iOS */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 216872832FAF8A0800A6006A /* XCRemoteSwiftPackageReference "FFmpeg-iOS" */;
+			productName = "FFmpeg-iOS";
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

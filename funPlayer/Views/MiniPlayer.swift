@@ -19,6 +19,12 @@ struct MiniPlayer: View {
                             .resizable()
                             .aspectRatio(contentMode: .fill)
                             .clipped()
+                    } else if let item = player.currentItem,
+                              let cachedImage = ArtworkCache.shared.image(for: item.id) {
+                        Image(uiImage: cachedImage)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .clipped()
                     } else {
                         Color.gray.opacity(0.3)
                     }
