@@ -128,16 +128,42 @@ private struct PlaybackControlsView: View {
     }
 }
 
-// MARK: - 图片缓存
+// MARK: - 图片缓存（内存 + 磁盘双缓存）
 class ArtworkCache {
     static let shared = ArtworkCache()
-    private var cache = NSCache<NSString, UIImage>()
+    private var memoryCache = NSCache<NSString, UIImage>()
+    private let diskCacheDirectory: URL
+
+    init() {
+        let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+        diskCacheDirectory = cachesDirectory.appendingPathComponent("ArtworkCache", isDirectory: true)
+        try? FileManager.default.createDirectory(at: diskCacheDirectory, withIntermediateDirectories: true)
+    }
 
     func image(for key: String) -> UIImage? {
-        cache.object(forKey: key as NSString)
+        let nsKey = key as NSString
+        // 先查内存缓存
+        if let image = memoryCache.object(forKey: nsKey) {
+            return image
+        }
+        // 内存没有，查磁盘缓存
+        let fileURL = diskCacheDirectory.appendingPathComponent(key)
+        if let data = try? Data(contentsOf: fileURL),
+           let image = UIImage(data: data) {
+            // 重新加载到内存缓存
+            memoryCache.setObject(image, forKey: nsKey)
+            return image
+        }
+        return nil
     }
 
     func setImage(_ image: UIImage, for key: String) {
-        cache.setObject(image, forKey: key as NSString)
+        let nsKey = key as NSString
+        memoryCache.setObject(image, forKey: nsKey)
+        // 同时写入磁盘
+        let fileURL = diskCacheDirectory.appendingPathComponent(key)
+        if let data = image.pngData() {
+            try? data.write(to: fileURL)
+        }
     }
 }

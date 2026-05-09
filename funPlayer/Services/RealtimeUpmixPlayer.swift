@@ -76,8 +76,8 @@ class RealtimeUpmixPlayer: ObservableObject {
         return true
     }
 
-    private static nonisolated func make712Layout() -> AVAudioChannelLayout? {
-        let ch = 10
+    private static nonisolated func make51Layout() -> AVAudioChannelLayout? {
+        let ch = 6
         let descOff = MemoryLayout<AudioChannelLayout>.offset(of: \.mChannelDescriptions)!
         let descS = MemoryLayout<AudioChannelDescription>.size
         let total = descOff + ch * descS
@@ -86,7 +86,7 @@ class RealtimeUpmixPlayer: ObservableObject {
         raw.initializeMemory(as: UInt8.self, repeating: 0, count: total)
 
         let lp = raw.bindMemory(to: AudioChannelLayout.self, capacity: 1)
-        lp.pointee.mChannelLayoutTag = kAudioChannelLayoutTag_UseChannelDescriptions
+        lp.pointee.mChannelLayoutTag = kAudioChannelLayoutTag_MPEG_5_1_A
         lp.pointee.mChannelBitmap = AudioChannelBitmap(rawValue: 0)
         lp.pointee.mNumberChannelDescriptions = UInt32(ch)
 
@@ -96,12 +96,8 @@ class RealtimeUpmixPlayer: ObservableObject {
             LabelCoord(label: kAudioChannelLabel_Right, x: 0.50, y: 0.87, z: 0.00),
             LabelCoord(label: kAudioChannelLabel_Center, x: 0.00, y: 1.00, z: 0.00),
             LabelCoord(label: kAudioChannelLabel_LFEScreen, x: 0.00, y: 0.00, z: 0.00),
-            LabelCoord(label: kAudioChannelLabel_LeftSurround, x: -1.00, y: 0.00, z: 0.00),
-            LabelCoord(label: kAudioChannelLabel_RightSurround, x: 1.00, y: 0.00, z: 0.00),
-            LabelCoord(label: kAudioChannelLabel_LeftSurroundDirect, x: -0.71, y: -0.71, z: 0.00),
-            LabelCoord(label: kAudioChannelLabel_RightSurroundDirect, x: 0.71, y: -0.71, z: 0.00),
-            LabelCoord(label: kAudioChannelLabel_VerticalHeightLeft, x: -0.71, y: 0.00, z: 0.71),
-            LabelCoord(label: kAudioChannelLabel_VerticalHeightRight, x: 0.71, y: 0.00, z: 0.71),
+            LabelCoord(label: kAudioChannelLabel_LeftSurround, x: -0.71, y: -0.71, z: 0.00),
+            LabelCoord(label: kAudioChannelLabel_RightSurround, x: 0.71, y: -0.71, z: 0.00),
         ]
 
         let dp = raw.advanced(by: descOff).bindMemory(to: AudioChannelDescription.self, capacity: ch)
@@ -246,7 +242,7 @@ class RealtimeUpmixPlayer: ObservableObject {
         let tf = src.frameLength
         let sr = sampleRate > 0 ? sampleRate : 44100.0
 
-        guard let layout = make712Layout() else { return nil }
+        guard let layout = make51Layout() else { return nil }
         let of = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sr, interleaved: false, channelLayout: layout)
         guard let dst = AVAudioPCMBuffer(pcmFormat: of, frameCapacity: tf) else { return nil }
 
@@ -263,18 +259,21 @@ class RealtimeUpmixPlayer: ObservableObject {
         let fl = dstData[0]; let fr = dstData[1]
         let fc = dstData[2]; let lf = dstData[3]
         let bl = dstData[4]; let br = dstData[5]
-        let slc = dstData[6]; let src0 = dstData[7]
-        let tfl = dstData[8]; let tfr = dstData[9]
+
+        let lfeGain: Float = 3.162
+        let surroundGain: Float = 0.35
+        let frontHighBoost: Float = 1.25
+        let surroundHighBoost: Float = 1.4
 
         for i in 0..<n {
             let l = sl[i]; let r = sr0[i]; let c = (l + r) * 0.5
-            fl[i]=l; fr[i]=r; fc[i]=c; lf[i]=c
-            bl[i]=l*0.5; br[i]=r*0.5; slc[i]=l*0.5; src0[i]=r*0.5
-            tfl[i]=l*0.3; tfr[i]=r*0.3
+            fl[i]=l * frontHighBoost; fr[i]=r * frontHighBoost; fc[i]=c * frontHighBoost
+            lf[i]=c * lfeGain
+            bl[i]=l * surroundGain * surroundHighBoost; br[i]=r * surroundGain * surroundHighBoost
         }
 
         let dbLabel = enableVolumeBalance ? "-10dB" : "0dB"
-        print("[Upmix] 7.1.2 buffer: \(n) frames, \(sr)Hz, vol=\(dbLabel)")
+        print("[Upmix] 5.1 buffer: \(n) frames, \(sr)Hz, vol=\(dbLabel), LFE=+10dB, Surround=-9dB+HF+3dB, Front+2dB")
         return dst
     }
 
@@ -314,7 +313,7 @@ class RealtimeUpmixPlayer: ObservableObject {
         pn.volume = enableVolumeBalance ? 0.316 : 1.0
 
         engine = ae; playerNode = pn; volumeMixer = nil
-        print("[Upmix] Playing 7.1.2 - ZERO FILES, vol=\(pn.volume), duration=\(duration)")
+        print("[Upmix] Playing 5.1, vol=\(pn.volume), duration=\(duration)")
 
         startProgressTimer()
     }

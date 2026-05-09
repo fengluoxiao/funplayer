@@ -1756,9 +1756,8 @@ struct PlaybackSettingsSection: View {
             .onChange(of: enableUpmix51) {
                 if enableUpmix51 {
                     showUpmixAlert = true
-                } else {
-                    PlayerManager.shared.disableUpmixAndRestart()
                 }
+                PlayerManager.shared.disableUpmixAndRestart()
             }
             .alert("立体声上混7.1.2", isPresented: $showUpmixAlert) {
                 Button("确定", role: .cancel) {}
@@ -1959,6 +1958,10 @@ struct InlineMiniPlayerView: View {
                         Image(uiImage: image)
                             .resizable()
                             .aspectRatio(contentMode: .fill)
+                    } else if let cachedImage = ArtworkCache.shared.image(for: item.id) {
+                        Image(uiImage: cachedImage)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
                     } else {
                         Color.gray.opacity(0.3)
                     }
@@ -2024,6 +2027,10 @@ struct ExpandedMiniPlayerView: View {
                 Group {
                     if let image = player.currentArtwork {
                         Image(uiImage: image)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    } else if let cachedImage = ArtworkCache.shared.image(for: item.id) {
+                        Image(uiImage: cachedImage)
                             .resizable()
                             .aspectRatio(contentMode: .fill)
                     } else {
