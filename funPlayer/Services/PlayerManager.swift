@@ -184,18 +184,24 @@ final class PlayerManager: ObservableObject {
         print("[PlayerManager] Volume balance: \(shouldApply ? "ON (-10dB)" : "OFF (0dB)") (channels: \(channelCount))")
     }
     
-    private func getCurrentAudioChannelCount() -> Int {
+    /// 获取当前播放内容的声道数
+    /// - Parameter format: 本地播放时传入 AVAudioFormat，在线播放时传 nil（从 AVPlayer 获取）
+    /// - Returns: 声道数，0 表示获取失败
+    func getCurrentAudioChannelCount(format: AVAudioFormat? = nil) -> Int {
+        // 如果传入了 format（本地播放），直接从 format 获取
+        if let fmt = format {
+            return Int(fmt.channelCount)
+        }
+        
+        // 在线播放：从 AVPlayerItem 获取
         guard let playerItem = player?.currentItem else { return 0 }
         
-        // 获取音轨信息
         let audioTracks = playerItem.asset.tracks(withMediaType: .audio)
         guard let audioTrack = audioTracks.first else { return 0 }
         
-        // 获取格式描述
         let formatDescriptions = audioTrack.formatDescriptions
         guard let formatDesc = formatDescriptions.first else { return 0 }
         
-        // 从格式描述中获取声道数
         guard let audioDesc = CMAudioFormatDescriptionGetStreamBasicDescription(formatDesc as! CMAudioFormatDescription) else { return 0 }
         
         return Int(audioDesc.pointee.mChannelsPerFrame)

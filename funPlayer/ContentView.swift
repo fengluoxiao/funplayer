@@ -1786,7 +1786,7 @@ struct PlaybackSettingsSection: View {
                 .alert("音量平衡", isPresented: $showVolumeBalanceAlert) {
                     Button("确定", role: .cancel) {}
                 } message: {
-                    Text("将上混音量降低约 -10dB，与杜比全景声 (-18 LUFS) 响度标准保持一致。")
+                    Text("将上混音量降低约 -10dB，与杜比全景声 (-18 LUFS) 响度标准保持一致。此功能仅对立体声音频生效，多声道音频会自动跳过。")
                 }
 
                 Toggle(isOn: $enableFrontCompensation) {

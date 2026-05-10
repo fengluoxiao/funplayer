@@ -68,7 +68,8 @@ class RealtimeUpmixPlayer: ObservableObject {
         guard url.isFileURL else { return }
         Task.detached(priority: .userInitiated) {
             let buf = await Self.process(url: url)
-            let upmixed = buf?.format.channelCount == 12
+            let channelCount = await MainActor.run { PlayerManager.shared.getCurrentAudioChannelCount(format: buf?.format) }
+            let upmixed = channelCount == 12
             await MainActor.run { self.play(buf, fmt: buf?.format, autoPlay: autoPlay, upmixed: upmixed) }
             if cleanupAfterProcessing { try? FileManager.default.removeItem(at: url) }
         }
@@ -77,7 +78,8 @@ class RealtimeUpmixPlayer: ObservableObject {
     func playUpmixed(data: Data, fileHint: AudioFileTypeID, autoPlay: Bool) async -> Bool {
         stop()
         guard let buf = await Self.process(data: data, fileHint: fileHint) else { return false }
-        let upmixed = buf.format.channelCount == 12
+        let channelCount = await MainActor.run { PlayerManager.shared.getCurrentAudioChannelCount(format: buf.format) }
+        let upmixed = channelCount == 12
         play(buf, fmt: buf.format, autoPlay: autoPlay, upmixed: upmixed)
         return true
     }
@@ -374,7 +376,8 @@ class RealtimeUpmixPlayer: ObservableObject {
         currentTime = 0
 
         let enableCustomSpatialAudio = UserDefaults.standard.bool(forKey: "enableUpmix51")
-        let isMultichannel = f.channelCount > 2
+        let channelCount = PlayerManager.shared.getCurrentAudioChannelCount(format: f)
+        let isMultichannel = channelCount > 2
         let shouldUseSpatialAudio = upmixed || (enableCustomSpatialAudio && isMultichannel)
 
         if shouldUseSpatialAudio {
@@ -398,10 +401,12 @@ class RealtimeUpmixPlayer: ObservableObject {
         distParams.maximumDistance = 10.0    // 超过10米后不再衰减
         distParams.rolloffFactor = 0.3       // 衰减曲线很平缓（默认1.0）
 
-        // === 混响配置：减少混响，让声音更"干"更贴近 ===
+        // === 混响配置：根据声道数调整混响 ===
         let reverbParams = envNode.reverbParameters
         reverbParams.enable = true
-        reverbParams.level = -50.0           // 混响电平很低（默认0dB）
+        // 立体声用-50dB保留轻微空间感，多声道用-96dB几乎无混响
+        let channelCountForReverb = PlayerManager.shared.getCurrentAudioChannelCount(format: b.format)
+        reverbParams.level = (channelCountForReverb == 2) ? -50.0 : -96.0
 
         ae.attach(envNode)
         ae.connect(envNode, to: ae.outputNode, format: nil)
@@ -414,7 +419,7 @@ class RealtimeUpmixPlayer: ObservableObject {
         // 坐标系：右手系，+X=右，+Y=上，+Z=前，单位：米
         // 距离调整：模拟真实家庭影院/耳机近场，扬声器距离0.5-1.0米
         let positions: [(AVAudio3DPoint, Float)]
-        let channelCount = Int(b.format.channelCount)
+        let channelCount = PlayerManager.shared.getCurrentAudioChannelCount(format: b.format)
 
         if upmixed || channelCount == 12 {
             // 7.1.4 布局（上混后的12声道）
