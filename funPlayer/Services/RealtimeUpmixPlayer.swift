@@ -401,7 +401,7 @@ class RealtimeUpmixPlayer: ObservableObject {
         // === 混响配置：减少混响，让声音更"干"更贴近 ===
         let reverbParams = envNode.reverbParameters
         reverbParams.enable = true
-        reverbParams.level = -20.0           // 混响电平很低（默认0dB）
+        reverbParams.level = -50.0           // 混响电平很低（默认0dB）
 
         ae.attach(envNode)
         ae.connect(envNode, to: ae.outputNode, format: nil)

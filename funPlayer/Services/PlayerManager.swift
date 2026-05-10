@@ -439,9 +439,9 @@ final class PlayerManager: ObservableObject {
 
             // 上混开启时使用 moviePlayback 模式以启用空间音频，关闭时使用 default 模式保持普通立体声
             let mode: AVAudioSession.Mode = enableUpmix ? .moviePlayback : .default
-            // 使用 mixWithOthers 选项，避免被其他音频App强制打断时丢失会话
-            // duckOthers 会在其他音频播放时自动降低音量，保持后台播放
-            try session.setCategory(.playback, mode: mode, options: [.mixWithOthers, .duckOthers])
+            // 音乐播放器需要独占音频会话，才能正确显示锁屏控制、灵动岛和通知中心
+            // 不使用 mixWithOthers，否则系统不会将本App识别为当前音频播放应用
+            try session.setCategory(.playback, mode: mode, options: [])
 
             if #available(iOS 15.0, *) {
                 try? session.setSupportsMultichannelContent(enableUpmix)
