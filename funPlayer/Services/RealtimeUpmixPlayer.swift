@@ -26,6 +26,8 @@ class RealtimeUpmixPlayer: ObservableObject {
     private var progressTimer: Timer?
     private var currentBuffer: AVAudioPCMBuffer?
     private var isUpmixed = false
+    private var environmentNode: AVAudioEnvironmentNode?
+    private var spatialPlayerNodes: [AVAudioPlayerNode] = []
 
     private init() {}
 
@@ -37,7 +39,7 @@ class RealtimeUpmixPlayer: ObservableObject {
             try session.setActive(true)
             if #available(iOS 15.0, *) { try? session.setSupportsMultichannelContent(true) }
             isEnabled = true
-            print("[Upmix] 7.1.2 mode + spatial audio enabled")
+            print("[Upmix] 7.1.4 mode + spatial audio enabled")
         } catch { fallback() }
     }
 
@@ -66,7 +68,7 @@ class RealtimeUpmixPlayer: ObservableObject {
         guard url.isFileURL else { return }
         Task.detached(priority: .userInitiated) {
             let buf = await Self.process(url: url)
-            let upmixed = buf?.format.channelCount == 6
+            let upmixed = buf?.format.channelCount == 12
             await MainActor.run { self.play(buf, fmt: buf?.format, autoPlay: autoPlay, upmixed: upmixed) }
             if cleanupAfterProcessing { try? FileManager.default.removeItem(at: url) }
         }
@@ -75,13 +77,13 @@ class RealtimeUpmixPlayer: ObservableObject {
     func playUpmixed(data: Data, fileHint: AudioFileTypeID, autoPlay: Bool) async -> Bool {
         stop()
         guard let buf = await Self.process(data: data, fileHint: fileHint) else { return false }
-        let upmixed = buf.format.channelCount == 6
+        let upmixed = buf.format.channelCount == 12
         play(buf, fmt: buf.format, autoPlay: autoPlay, upmixed: upmixed)
         return true
     }
 
-    private static nonisolated func make51Layout() -> AVAudioChannelLayout? {
-        let ch = 6
+    private static nonisolated func make714Layout() -> AVAudioChannelLayout? {
+        let ch = 12
         let descOff = MemoryLayout<AudioChannelLayout>.offset(of: \.mChannelDescriptions)!
         let descS = MemoryLayout<AudioChannelDescription>.size
         let total = descOff + ch * descS
@@ -90,18 +92,26 @@ class RealtimeUpmixPlayer: ObservableObject {
         raw.initializeMemory(as: UInt8.self, repeating: 0, count: total)
 
         let lp = raw.bindMemory(to: AudioChannelLayout.self, capacity: 1)
-        lp.pointee.mChannelLayoutTag = kAudioChannelLayoutTag_MPEG_5_1_A
+        lp.pointee.mChannelLayoutTag = kAudioChannelLayoutTag_Atmos_7_1_4
         lp.pointee.mChannelBitmap = AudioChannelBitmap(rawValue: 0)
         lp.pointee.mNumberChannelDescriptions = UInt32(ch)
 
         struct LabelCoord { let label: AudioChannelLabel; let x: Float; let y: Float; let z: Float }
         let chDesc: [LabelCoord] = [
-            LabelCoord(label: kAudioChannelLabel_Left, x: -0.50, y: 0.87, z: 0.00),
-            LabelCoord(label: kAudioChannelLabel_Right, x: 0.50, y: 0.87, z: 0.00),
-            LabelCoord(label: kAudioChannelLabel_Center, x: 0.00, y: 1.00, z: 0.00),
-            LabelCoord(label: kAudioChannelLabel_LFEScreen, x: 0.00, y: 0.00, z: 0.00),
-            LabelCoord(label: kAudioChannelLabel_LeftSurround, x: -0.71, y: -0.71, z: 0.00),
-            LabelCoord(label: kAudioChannelLabel_RightSurround, x: 0.71, y: -0.71, z: 0.00),
+            // 7.1 平面声道 (y=0 表示在听众高度)
+            LabelCoord(label: kAudioChannelLabel_Left, x: -1.0, y: 0.0, z: 1.0),               // Front Left
+            LabelCoord(label: kAudioChannelLabel_Right, x: 1.0, y: 0.0, z: 1.0),                // Front Right
+            LabelCoord(label: kAudioChannelLabel_Center, x: 0.0, y: 0.0, z: 1.0),               // Center
+            LabelCoord(label: kAudioChannelLabel_LFEScreen, x: 0.0, y: -0.5, z: 0.5),           // LFE (下方)
+            LabelCoord(label: kAudioChannelLabel_LeftSurround, x: -1.5, y: 0.0, z: 0.0),        // Side Left
+            LabelCoord(label: kAudioChannelLabel_RightSurround, x: 1.5, y: 0.0, z: 0.0),        // Side Right
+            LabelCoord(label: kAudioChannelLabel_LeftSurroundDirect, x: -1.0, y: 0.0, z: -1.0), // Rear Left
+            LabelCoord(label: kAudioChannelLabel_RightSurroundDirect, x: 1.0, y: 0.0, z: -1.0), // Rear Right
+            // 4 顶部声道 (y=0.7 表示在头顶上方0.7米，45度角)
+            LabelCoord(label: kAudioChannelLabel_LeftTopFront, x: -0.7, y: 0.7, z: 0.7),        // Top Front Left
+            LabelCoord(label: kAudioChannelLabel_RightTopFront, x: 0.7, y: 0.7, z: 0.7),        // Top Front Right
+            LabelCoord(label: kAudioChannelLabel_LeftTopRear, x: -0.7, y: 0.7, z: -0.7),        // Top Rear Left
+            LabelCoord(label: kAudioChannelLabel_RightTopRear, x: 0.7, y: 0.7, z: -0.7),        // Top Rear Right
         ]
 
         let dp = raw.advanced(by: descOff).bindMemory(to: AudioChannelDescription.self, capacity: ch)
@@ -244,7 +254,7 @@ class RealtimeUpmixPlayer: ObservableObject {
         guard src.frameLength > 0 else { return nil }
         let sf = src.format
         let tf = src.frameLength
-        let sr = sampleRate > 0 ? sampleRate : 44100.0
+        let sampleRateValue = sampleRate > 0 ? sampleRate : sf.sampleRate
 
         // 只处理立体声（2声道），其他直接 bypass
         guard sf.channelCount == 2 else {
@@ -252,8 +262,8 @@ class RealtimeUpmixPlayer: ObservableObject {
             return src
         }
 
-        guard let layout = make51Layout() else { return nil }
-        let of = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sr, interleaved: false, channelLayout: layout)
+        guard let layout = make714Layout() else { return nil }
+        let of = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sampleRateValue, interleaved: false, channelLayout: layout)
         guard let dst = AVAudioPCMBuffer(pcmFormat: of, frameCapacity: tf) else { return nil }
 
         let enableVolumeBalance = UserDefaults.standard.bool(forKey: "enableVolumeBalance")
@@ -262,50 +272,97 @@ class RealtimeUpmixPlayer: ObservableObject {
         dst.frameLength = AVAudioFrameCount(n)
 
         guard let srcData = src.floatChannelData else { return nil }
-        let sl = srcData[0]
-        let sr0 = srcData[1]
+        let srcL = srcData[0]
+        let srcR = srcData[1]
 
         guard let dstData = dst.floatChannelData else { return nil }
-        let fl = dstData[0]; let fr = dstData[1]
-        let fc = dstData[2]; let lf = dstData[3]
-        let bl = dstData[4]; let br = dstData[5]
+        // 7.1.4 声道映射
+        let fl = dstData[0];  let fr = dstData[1]   // Front L/R
+        let fc = dstData[2];  let lf = dstData[3]   // Center, LFE
+        let sl = dstData[4];  let sr = dstData[5]   // Side Surround L/R
+        let rl = dstData[6];  let rr = dstData[7]   // Rear Surround L/R
+        let tfl = dstData[8]; let tfr = dstData[9]  // Top Front L/R
+        let trl = dstData[10]; let trr = dstData[11] // Top Rear L/R
 
         let enableFrontCompensation = UserDefaults.standard.bool(forKey: "enableFrontCompensation")
         let enableSurroundCompensation = UserDefaults.standard.bool(forKey: "enableSurroundCompensation")
         let enableLFECompensation = UserDefaults.standard.bool(forKey: "enableLFECompensation")
 
-        // 杜比5.1标准增益（相对前置声道）：
-        // L/R/C = 0dB, Ls/Rs = -3dB, LFE = +10dB
-        let lfeGain: Float = enableLFECompensation ? 3.162 : 1.0   // +10dB
-        let surroundGain: Float = enableSurroundCompensation ? 0.708 : 1.0  // -3dB
+        // 7.1.4 增益设置
+        // L/R/C = 0dB, Side Ls/Rs = -3dB, Rear Ls/Rs = -6dB, Top = -9dB, LFE = +6dB
+        let lfeGain: Float = enableLFECompensation ? 2.0 : 1.0       // +6dB
+        let sideSurroundGain: Float = enableSurroundCompensation ? 0.708 : 1.0  // -3dB
+        let rearSurroundGain: Float = enableSurroundCompensation ? 0.501 : 1.0  // -6dB
+        let topGain: Float = enableFrontCompensation ? 0.354 : 1.0   // -9dB
         let frontHighBoost: Float = enableFrontCompensation ? 1.0 : 1.0
-        let surroundHighBoost: Float = enableSurroundCompensation ? 1.0 : 1.0
+
+        let sampleRateF = Float(sampleRateValue)
+
+        // 滤波器状态
+        let alphaSide: Float = exp(-2.0 * .pi * 200.0 / sampleRateF)    // Side 200Hz高通
+        let alphaRear: Float = exp(-2.0 * .pi * 250.0 / sampleRateF)    // Rear 250Hz高通
+        let alphaTop: Float = exp(-2.0 * .pi * 400.0 / sampleRateF)     // Top 400Hz高通
+        let alphaCenter: Float = exp(-2.0 * .pi * 80.0 / sampleRateF)   // Center 80Hz高通
+
+        var prevDiffL: Float = 0, prevDiffR: Float = 0
+        var prevSideL: Float = 0, prevSideR: Float = 0
+        var prevRearL: Float = 0, prevRearR: Float = 0
+        var prevTopFL: Float = 0, prevTopFR: Float = 0
+        var prevTopRL: Float = 0, prevTopRR: Float = 0
+        var prevMono: Float = 0, prevCenterOut: Float = 0
 
         for i in 0..<n {
-            let l = sl[i]; let r = sr0[i]
+            let l = srcL[i]; let r = srcR[i]
 
             // === 前置左右：直接输出 ===
             fl[i] = l * frontHighBoost
             fr[i] = r * frontHighBoost
 
-            // === 中置：单声道内容，0dB ===
+            // === 中置：单声道内容 + 高通滤波 ===
             let mono = (l + r) * 0.5
-            fc[i] = mono * frontHighBoost
+            let centerOut = alphaCenter * (prevCenterOut + mono - prevMono)
+            prevCenterOut = centerOut; prevMono = mono
+            fc[i] = centerOut * frontHighBoost
 
-            // === LFE：单声道内容，+10dB ===
+            // === LFE：单声道内容，+6dB ===
             lf[i] = mono * lfeGain
 
-            // === 环绕：差分信号，-3dB ===
+            // === Side 环绕：差分信号 + 200Hz高通，-3dB ===
             let diffL = l - r
             let diffR = r - l
-            bl[i] = diffL * 0.5 * surroundGain * surroundHighBoost
-            br[i] = diffR * 0.5 * surroundGain * surroundHighBoost
+            let sideL = alphaSide * (prevSideL + diffL - prevDiffL)
+            let sideR = alphaSide * (prevSideR + diffR - prevDiffR)
+            prevSideL = sideL; prevSideR = sideR
+            prevDiffL = diffL; prevDiffR = diffR
+            sl[i] = sideL * 0.5 * sideSurroundGain
+            sr[i] = sideR * 0.5 * sideSurroundGain
+
+            // === Rear 环绕：差分信号 + 250Hz高通，-6dB ===
+            let rearL = alphaRear * (prevRearL + diffL - prevDiffL)
+            let rearR = alphaRear * (prevRearR + diffR - prevDiffR)
+            prevRearL = rearL; prevRearR = rearR
+            rl[i] = rearL * 0.5 * rearSurroundGain
+            rr[i] = rearR * 0.5 * rearSurroundGain
+
+            // === Top Front：前置高频内容，-9dB ===
+            let topFL = alphaTop * (prevTopFL + l - prevDiffL)
+            let topFR = alphaTop * (prevTopFR + r - prevDiffR)
+            prevTopFL = topFL; prevTopFR = topFR
+            tfl[i] = topFL * topGain
+            tfr[i] = topFR * topGain
+
+            // === Top Rear：差分高频内容，-9dB ===
+            let topRL = alphaTop * (prevTopRL + diffL - prevDiffL)
+            let topRR = alphaTop * (prevTopRR + diffR - prevDiffR)
+            prevTopRL = topRL; prevTopRR = topRR
+            trl[i] = topRL * 0.5 * topGain
+            trr[i] = topRR * 0.5 * topGain
         }
 
         let dbLabel = enableVolumeBalance ? "-10dB" : "0dB"
-        let lfeDb = enableLFECompensation ? "+10dB" : "0dB"
+        let lfeDb = enableLFECompensation ? "+6dB" : "0dB"
         let surDb = enableSurroundCompensation ? "-3dB" : "0dB"
-        print("[Upmix] 5.1 buffer: \(n) frames, \(sr)Hz, vol=\(dbLabel), LFE=\(lfeDb), Surround=\(surDb), Front=0dB")
+        print("[Upmix] 7.1.4 buffer: \(n) frames, \(sampleRateValue)Hz, vol=\(dbLabel), LFE=\(lfeDb), Side=\(surDb), Rear=-6dB, Top=-9dB")
         return dst
     }
 
@@ -316,6 +373,101 @@ class RealtimeUpmixPlayer: ObservableObject {
         duration = Double(b.frameLength) / f.sampleRate
         currentTime = 0
 
+        let enableCustomSpatialAudio = UserDefaults.standard.bool(forKey: "enableUpmix51")
+        let isMultichannel = f.channelCount > 2
+        let shouldUseSpatialAudio = upmixed || (enableCustomSpatialAudio && isMultichannel)
+
+        if shouldUseSpatialAudio && upmixed {
+            // 使用 AVAudioEnvironmentNode 进行3D空间化
+            playWithEnvironmentNode(b: b, f: f, autoPlay: autoPlay, upmixed: upmixed)
+        } else {
+            // 使用传统方式播放
+            playWithTraditionalEngine(b: b, f: f, autoPlay: autoPlay, upmixed: upmixed)
+        }
+    }
+
+    private func playWithEnvironmentNode(b: AVAudioPCMBuffer, f: AVAudioFormat, autoPlay: Bool, upmixed: Bool) {
+        let ae = AVAudioEngine()
+        let envNode = AVAudioEnvironmentNode()
+        envNode.renderingAlgorithm = .HRTFHQ
+        ae.attach(envNode)
+        ae.connect(envNode, to: ae.outputNode, format: nil)
+
+        // 从7.1.4 buffer中提取各声道并创建独立的playerNode
+        let channelBuffers = extractChannels(from: b)
+        var players: [AVAudioPlayerNode] = []
+
+        // 定义7.1.4各声道的3D位置（基于Apple空间音频坐标系和杜比标准）
+        // 坐标系：右手系，+X=右，+Y=上，+Z=前，单位：米
+        let positions: [(AVAudio3DPoint, Float)] = [
+            (AVAudio3DPoint(x: -1.0, y: 0.0, z: 1.0), 1.0),    // Front Left
+            (AVAudio3DPoint(x: 1.0, y: 0.0, z: 1.0), 1.0),     // Front Right
+            (AVAudio3DPoint(x: 0.0, y: 0.0, z: 1.0), 0.8),     // Center
+            (AVAudio3DPoint(x: 0.0, y: -0.5, z: 0.5), 1.5),    // LFE (下方)
+            (AVAudio3DPoint(x: -1.5, y: 0.0, z: 0.0), 0.6),    // Side Left
+            (AVAudio3DPoint(x: 1.5, y: 0.0, z: 0.0), 0.6),     // Side Right
+            (AVAudio3DPoint(x: -1.0, y: 0.0, z: -1.0), 0.5),   // Rear Left
+            (AVAudio3DPoint(x: 1.0, y: 0.0, z: -1.0), 0.5),    // Rear Right
+            (AVAudio3DPoint(x: -0.7, y: 0.7, z: 0.7), 0.35),   // Top Front Left (45度)
+            (AVAudio3DPoint(x: 0.7, y: 0.7, z: 0.7), 0.35),    // Top Front Right (45度)
+            (AVAudio3DPoint(x: -0.7, y: 0.7, z: -0.7), 0.3),   // Top Rear Left (45度)
+            (AVAudio3DPoint(x: 0.7, y: 0.7, z: -0.7), 0.3)     // Top Rear Right (45度)
+        ]
+
+        for (index, channelBuf) in channelBuffers.enumerated() {
+            guard index < positions.count else { break }
+            let player = AVAudioPlayerNode()
+            player.position = positions[index].0
+            player.renderingAlgorithm = .HRTFHQ
+            player.volume = positions[index].1
+            ae.attach(player)
+            ae.connect(player, to: envNode, format: channelBuf.format)
+            player.scheduleBuffer(channelBuf, at: nil, options: .loops, completionHandler: nil)
+            players.append(player)
+        }
+
+        do {
+            try ae.start()
+            if autoPlay {
+                players.forEach { $0.play() }
+            }
+        } catch {
+            print("[Upmix] EnvironmentNode engine start failed: \(error)")
+            return
+        }
+
+        engine = ae
+        environmentNode = envNode
+        spatialPlayerNodes = players
+        playerNode = players.first
+
+        let dbLabel = UserDefaults.standard.bool(forKey: "enableVolumeBalance") ? "-10dB" : "0dB"
+        print("[Upmix] Playing with EnvironmentNode 7.1.4, vol=\(dbLabel)")
+        startProgressTimer()
+    }
+
+    private func extractChannels(from buffer: AVAudioPCMBuffer) -> [AVAudioPCMBuffer] {
+        let frameLength = buffer.frameLength
+        let sampleRate = buffer.format.sampleRate
+        var channelBuffers: [AVAudioPCMBuffer] = []
+
+        for channel in 0..<Int(buffer.format.channelCount) {
+            guard let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1) else { continue }
+            guard let singleChannelBuffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameLength) else { continue }
+            singleChannelBuffer.frameLength = frameLength
+
+            if let srcData = buffer.floatChannelData?[channel],
+               let dstData = singleChannelBuffer.floatChannelData?[0] {
+                for i in 0..<Int(frameLength) {
+                    dstData[i] = srcData[i]
+                }
+            }
+            channelBuffers.append(singleChannelBuffer)
+        }
+        return channelBuffers
+    }
+
+    private func playWithTraditionalEngine(b: AVAudioPCMBuffer, f: AVAudioFormat, autoPlay: Bool, upmixed: Bool) {
         let ae = AVAudioEngine()
         let pn = AVAudioPlayerNode()
         ae.attach(pn)
@@ -346,6 +498,10 @@ class RealtimeUpmixPlayer: ObservableObject {
         }
 
         ae.connect(lastNode, to: ae.outputNode, format: f)
+        startEngineAndSchedule(ae: ae, pn: pn, b: b, autoPlay: autoPlay, upmixed: upmixed)
+    }
+
+    private func startEngineAndSchedule(ae: AVAudioEngine, pn: AVAudioPlayerNode, b: AVAudioPCMBuffer, autoPlay: Bool, upmixed: Bool) {
         do { try ae.start() } catch {
             print("[Upmix] AVAudioEngine start failed: \(error)")
             return
@@ -457,8 +613,11 @@ class RealtimeUpmixPlayer: ObservableObject {
 
     func stop() {
         stopProgressTimer()
+        spatialPlayerNodes.forEach { $0.stop() }
+        spatialPlayerNodes = []
         playerNode?.stop(); engine?.stop()
         engine = nil; playerNode = nil; volumeMixer = nil; eqNode = nil
+        environmentNode = nil
         currentBuffer = nil
         isUpmixed = false
         currentTime = 0; duration = 0
@@ -478,10 +637,9 @@ class RealtimeUpmixPlayer: ObservableObject {
         let enableSurroundCompensation = UserDefaults.standard.bool(forKey: "enableSurroundCompensation")
         let enableLFECompensation = UserDefaults.standard.bool(forKey: "enableLFECompensation")
 
-        // 参考杜比影院规范:
-        // - Screen Speaker: 80Hz-16kHz ±3dB
-        // - Surround: 40Hz-16kHz +3/-6dB
-        // - LFE: 31.5-120Hz ±3dB
+        // 参考 Sony Dolby Atmos 官方 10段 EQ 频率:
+        // 47, 230, 470, 840, 1.3k, 2.3k, 3.8k, 5.8k, 9k, 14k Hz
+        // 针对耳机优化，避免低频堆积和高频刺耳
 
         // Band 0: LFE Low Pass (120Hz, 符合杜比LFE规范)
         eq.bands[0].frequency = 120
@@ -489,32 +647,174 @@ class RealtimeUpmixPlayer: ObservableObject {
         eq.bands[0].bypass = !enableLFECompensation
         eq.bands[0].gain = 0
 
-        // Band 1: Front High Shelf (12kHz, +4dB, 大幅扩展高频响应)
-        eq.bands[1].frequency = 12000
-        eq.bands[1].filterType = .highShelf
-        eq.bands[1].bandwidth = 1.0
+        // Band 1: Front Low Cut (80Hz, -2dB, 减少前置低频堆积)
+        eq.bands[1].frequency = 80
+        eq.bands[1].filterType = .parametric
+        eq.bands[1].bandwidth = 1.5
         eq.bands[1].bypass = !enableFrontCompensation
-        eq.bands[1].gain = enableFrontCompensation ? 4.0 : 0
+        eq.bands[1].gain = enableFrontCompensation ? -2.0 : 0
 
-        // Band 2: Front Presence Boost (4kHz, +3dB, 增加人声清晰度)
-        eq.bands[2].frequency = 4000
+        // Band 2: Front Presence Boost (2.3kHz, +2dB, 增强人声清晰度)
+        eq.bands[2].frequency = 2300
         eq.bands[2].filterType = .parametric
         eq.bands[2].bandwidth = 1.2
         eq.bands[2].bypass = !enableFrontCompensation
-        eq.bands[2].gain = enableFrontCompensation ? 3.0 : 0
+        eq.bands[2].gain = enableFrontCompensation ? 2.0 : 0
 
-        // Band 3: Surround High Boost (8kHz, +5dB, 补偿环绕高频衰减)
-        eq.bands[3].frequency = 8000
+        // Band 3: Surround High Boost (5.8kHz, +3dB, 补偿环绕高频衰减)
+        eq.bands[3].frequency = 5800
         eq.bands[3].filterType = .parametric
         eq.bands[3].bandwidth = 1.5
         eq.bands[3].bypass = !enableSurroundCompensation
-        eq.bands[3].gain = enableSurroundCompensation ? 5.0 : 0
+        eq.bands[3].gain = enableSurroundCompensation ? 3.0 : 0
 
-        // Band 4: Surround Air Boost (16kHz, +3dB, 增加环绕空气感)
-        eq.bands[4].frequency = 16000
+        // Band 4: Surround Air Boost (14kHz, +2dB, 增加环绕空气感)
+        eq.bands[4].frequency = 14000
         eq.bands[4].filterType = .highShelf
         eq.bands[4].bandwidth = 1.0
         eq.bands[4].bypass = !enableSurroundCompensation
-        eq.bands[4].gain = enableSurroundCompensation ? 3.0 : 0
+        eq.bands[4].gain = enableSurroundCompensation ? 2.0 : 0
+    }
+
+    private func setupSpatialMixer(engine: AVAudioEngine, lastNode: AVAudioNode, inputFormat: AVAudioFormat, completion: @escaping (Bool) -> Void) {
+        let componentDescription = AudioComponentDescription(
+            componentType: kAudioUnitType_Mixer,
+            componentSubType: kAudioUnitSubType_SpatialMixer,
+            componentManufacturer: kAudioUnitManufacturer_Apple,
+            componentFlags: 0,
+            componentFlagsMask: 0
+        )
+
+        AVAudioUnit.instantiate(with: componentDescription, options: .loadOutOfProcess) { avAudioUnit, error in
+            guard let spatialMixer = avAudioUnit else {
+                print("[Upmix] Failed to instantiate SpatialMixer: \(String(describing: error))")
+                completion(false)
+                return
+            }
+
+            let au = spatialMixer.audioUnit
+
+            // 根据输入声道数选择正确的声道布局标签
+            let channelCount = inputFormat.channelCount
+            let inputLayoutTag: AudioChannelLayoutTag
+            switch channelCount {
+            case 6:
+                inputLayoutTag = kAudioChannelLayoutTag_MPEG_5_1_A
+            case 8:
+                inputLayoutTag = kAudioChannelLayoutTag_MPEG_7_1_A
+            default:
+                inputLayoutTag = kAudioChannelLayoutTag_DiscreteInOrder | UInt32(channelCount)
+            }
+
+            // 配置输入格式
+            var inputStreamFormat = inputFormat.streamDescription.pointee
+
+            var inputLayout = AudioChannelLayout()
+            inputLayout.mChannelLayoutTag = inputLayoutTag
+            inputLayout.mChannelBitmap = AudioChannelBitmap(rawValue: 0)
+            inputLayout.mNumberChannelDescriptions = 0
+
+            let inputLayoutSize = UInt32(MemoryLayout<AudioChannelLayout>.size)
+            let layoutStatus = AudioUnitSetProperty(
+                au,
+                kAudioUnitProperty_AudioChannelLayout,
+                kAudioUnitScope_Input,
+                0,
+                &inputLayout,
+                inputLayoutSize
+            )
+            if layoutStatus != noErr {
+                print("[Upmix] Failed to set input channel layout: \(layoutStatus)")
+            }
+
+            let formatStatus = AudioUnitSetProperty(
+                au,
+                kAudioUnitProperty_StreamFormat,
+                kAudioUnitScope_Input,
+                0,
+                &inputStreamFormat,
+                UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+            )
+            if formatStatus != noErr {
+                print("[Upmix] Failed to set input stream format: \(formatStatus)")
+            }
+
+            // 配置输出格式（保持与输入相同的声道数）
+            var outputStreamFormat = inputStreamFormat
+            let outputLayoutStatus = AudioUnitSetProperty(
+                au,
+                kAudioUnitProperty_AudioChannelLayout,
+                kAudioUnitScope_Output,
+                0,
+                &inputLayout,
+                inputLayoutSize
+            )
+            if outputLayoutStatus != noErr {
+                print("[Upmix] Failed to set output channel layout: \(outputLayoutStatus)")
+            }
+
+            let outputFormatStatus = AudioUnitSetProperty(
+                au,
+                kAudioUnitProperty_StreamFormat,
+                kAudioUnitScope_Output,
+                0,
+                &outputStreamFormat,
+                UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+            )
+            if outputFormatStatus != noErr {
+                print("[Upmix] Failed to set output stream format: \(outputFormatStatus)")
+            }
+
+            // 设置渲染算法为 UseOutputType（让系统根据输出设备选择最佳算法）
+            // 避免双重空间化：AUSpatialMixer 只做声道映射和简单声像定位
+            // 最终的 HRTF 渲染交给系统 Spatial Audio 处理
+            var renderingAlgorithm = UInt32(7) // kSpatializationAlgorithm_UseOutputType = 7
+            let algoStatus = AudioUnitSetProperty(
+                au,
+                kAudioUnitProperty_SpatializationAlgorithm,
+                kAudioUnitScope_Input,
+                0,
+                &renderingAlgorithm,
+                UInt32(MemoryLayout<UInt32>.size)
+            )
+            if algoStatus != noErr {
+                print("[Upmix] Failed to set rendering algorithm: \(algoStatus)")
+            }
+
+            // 禁用 AUSpatialMixer 的头部跟踪，避免与系统 Spatial Audio 冲突
+            // 系统 Spatial Audio 会提供更好的头部跟踪体验
+            var enableHeadTracking = UInt32(0)
+            let headTrackingStatus = AudioUnitSetProperty(
+                au,
+                kAudioUnitProperty_SpatialMixerEnableHeadTracking,
+                kAudioUnitScope_Input,
+                0,
+                &enableHeadTracking,
+                UInt32(MemoryLayout<UInt32>.size)
+            )
+            if headTrackingStatus != noErr {
+                print("[Upmix] Failed to disable head tracking: \(headTrackingStatus)")
+            }
+
+            // 设置源模式为 AmbienceBed（适合多声道床）
+            var sourceMode = UInt32(3) // kSpatialMixerSourceMode_AmbienceBed = 3
+            let sourceStatus = AudioUnitSetProperty(
+                au,
+                kAudioUnitProperty_SpatialMixerSourceMode,
+                kAudioUnitScope_Input,
+                0,
+                &sourceMode,
+                UInt32(MemoryLayout<UInt32>.size)
+            )
+            if sourceStatus != noErr {
+                print("[Upmix] Failed to set source mode: \(sourceStatus)")
+            }
+
+            engine.attach(spatialMixer)
+            engine.connect(lastNode, to: spatialMixer, format: inputFormat)
+            engine.connect(spatialMixer, to: engine.outputNode, format: inputFormat)
+            print("[Upmix] Spatial Mixer (HRTF) enabled for \(channelCount) channels")
+            completion(true)
+        }
     }
 }

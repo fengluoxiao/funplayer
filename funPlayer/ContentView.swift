@@ -1755,7 +1755,7 @@ struct PlaybackSettingsSection: View {
             Toggle(isOn: $enableUpmix51) {
                 HStack {
                     Image(systemName: "speaker.wave.3")
-                    Text("强制立体声使用空间音频输出")
+                    Text("使用自定义空间音频")
                 }
             }
             .onChange(of: enableUpmix51) {
@@ -1764,10 +1764,10 @@ struct PlaybackSettingsSection: View {
                 }
                 PlayerManager.shared.disableUpmixAndRestart()
             }
-            .alert("强制立体声使用空间音频输出", isPresented: $showUpmixAlert) {
+            .alert("使用自定义空间音频", isPresented: $showUpmixAlert) {
                 Button("确定", role: .cancel) {}
             } message: {
-                Text("开启后，立体声内容将通过系统空间音频处理输出，可能带来沉浸感提升，但也可能导致音质劣化。建议根据个人听感选择是否开启。")
+                Text("开启后，将使用自定义 HRTF 空间音频渲染替代系统默认渲染。支持立体声上混和杜比全景声播放，可能带来更好的沉浸感和定位精度。建议根据个人听感选择是否开启。")
             }
 
             if enableUpmix51 {
