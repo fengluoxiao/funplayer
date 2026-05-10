@@ -171,8 +171,11 @@ final class PlayerManager: ObservableObject {
     
     func applyVolumeBalance() {
         let enableVolumeBalance = UserDefaults.standard.bool(forKey: "enableVolumeBalance")
-        player?.volume = enableVolumeBalance ? 0.316 : 1.0
-        print("[PlayerManager] Volume balance: \(enableVolumeBalance ? "ON (-10dB)" : "OFF (0dB)")")
+        let enableUpmix = UserDefaults.standard.bool(forKey: "enableUpmix51")
+        // 只有开启上混（系统空间化处理生效）时才应用音量补偿
+        let shouldApply = enableVolumeBalance && enableUpmix
+        player?.volume = shouldApply ? 0.316 : 1.0
+        print("[PlayerManager] Volume balance: \(shouldApply ? "ON (-10dB)" : "OFF (0dB)")")
     }
 
     private func playCurrentItemAsync(autoPlay: Bool) async {
@@ -379,14 +382,18 @@ final class PlayerManager: ObservableObject {
         #if os(iOS) || os(tvOS) || os(watchOS)
         do {
             let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .moviePlayback, options: [])
+            let enableUpmix = UserDefaults.standard.bool(forKey: "enableUpmix51")
+            
+            // 上混开启时使用 moviePlayback 模式以启用空间音频，关闭时使用 default 模式保持普通立体声
+            let mode: AVAudioSession.Mode = enableUpmix ? .moviePlayback : .default
+            try session.setCategory(.playback, mode: mode, options: [])
+            
             if #available(iOS 15.0, *) {
-                let enableUpmix = UserDefaults.standard.bool(forKey: "enableUpmix51")
                 try? session.setSupportsMultichannelContent(enableUpmix)
-                print("[PlayerManager] Multichannel support: \(enableUpmix)")
             }
+            
             try session.setActive(true)
-            print("[PlayerManager] Audio session configured")
+            print("[PlayerManager] Audio session configured: mode=\(mode.rawValue), multichannel=\(enableUpmix)")
         } catch {
             print("[PlayerManager] Audio session error: \(error)")
         }
@@ -394,7 +401,16 @@ final class PlayerManager: ObservableObject {
     }
 
     private func setupPlayer(url: URL, autoPlay: Bool = true) async {
-        let playerItem = AVPlayerItem(asset: AVAsset(url: url))
+        let asset = AVAsset(url: url)
+        let playerItem = AVPlayerItem(asset: asset)
+
+        // 允许对立体声和多声道内容进行空间化处理
+        if #available(iOS 15.0, *) {
+            playerItem.allowedAudioSpatializationFormats = .monoStereoAndMultichannel
+        }
+
+        // 设置音频处理 Tap（EQ）
+        setupAudioProcessingTap(for: playerItem)
 
         if let existing = player {
             existing.replaceCurrentItem(with: playerItem)
@@ -406,6 +422,89 @@ final class PlayerManager: ObservableObject {
 
         await waitForItemReady(autoPlay: autoPlay)
         addTimeObserver()
+    }
+
+    private func setupAudioProcessingTap(for playerItem: AVPlayerItem) {
+        let enableEQ = UserDefaults.standard.bool(forKey: "enableEQ")
+        let enableUpmixCompensation = UserDefaults.standard.bool(forKey: "enableUpmix51")
+
+        guard enableEQ || enableUpmixCompensation else { return }
+
+        let selfPointer = UnsafeMutableRawPointer(Unmanaged.passRetained(self).toOpaque())
+
+        var callbacks = MTAudioProcessingTapCallbacks(
+            version: kMTAudioProcessingTapCallbacksVersion_0,
+            clientInfo: selfPointer,
+            init: { (tap: MTAudioProcessingTap, clientInfo: UnsafeMutableRawPointer?, tapStorageOut: UnsafeMutablePointer<UnsafeMutableRawPointer?>) in
+                print("[PlayerManager] Audio tap initialized")
+            },
+            finalize: { (tap: MTAudioProcessingTap) in
+                print("[PlayerManager] Audio tap finalized")
+            },
+            prepare: { (tap: MTAudioProcessingTap, maxFrames: CMItemCount, processingFormat: UnsafePointer<AudioStreamBasicDescription>) in
+                print("[PlayerManager] Audio tap prepared: maxFrames=\(maxFrames), sampleRate=\(processingFormat.pointee.mSampleRate)")
+            },
+            unprepare: { (tap: MTAudioProcessingTap) in
+                print("[PlayerManager] Audio tap unprepared")
+            },
+            process: { (tap: MTAudioProcessingTap, numberFrames: CMItemCount, flags: MTAudioProcessingTapFlags, bufferListInOut: UnsafeMutablePointer<AudioBufferList>, numberFramesOut: UnsafeMutablePointer<CMItemCount>, flagsOut: UnsafeMutablePointer<MTAudioProcessingTapFlags>) in
+                let status = MTAudioProcessingTapGetSourceAudio(tap, numberFrames, bufferListInOut, flagsOut, nil, numberFramesOut)
+                guard status == noErr else { return }
+
+                let enableEQ = UserDefaults.standard.bool(forKey: "enableEQ")
+                let enableUpmixCompensation = UserDefaults.standard.bool(forKey: "enableUpmix51")
+
+                guard enableEQ || enableUpmixCompensation else { return }
+
+                let bufferList = UnsafeMutableAudioBufferListPointer(bufferListInOut)
+
+                for (channel, buffer) in bufferList.enumerated() {
+                    guard let data = buffer.mData else { continue }
+                    let frameCount = Int(numberFramesOut.pointee)
+                    let samples = UnsafeMutablePointer<Float>(OpaquePointer(data))
+
+                    for i in 0..<frameCount {
+                        var sample = samples[i]
+
+                        if enableEQ {
+                            sample = sample * 1.1
+                        }
+
+                        if enableUpmixCompensation {
+                            if channel == 2 {
+                                sample = sample * 0.9
+                            } else if channel == 3 {
+                                sample = sample * 1.2
+                            } else if channel >= 4 {
+                                sample = sample * 0.8
+                            }
+                        }
+
+                        samples[i] = sample
+                    }
+                }
+            }
+        )
+
+        var tap: MTAudioProcessingTap?
+        let status = MTAudioProcessingTapCreate(kCFAllocatorDefault, &callbacks, kMTAudioProcessingTapCreationFlag_PostEffects, &tap)
+
+        guard status == noErr, let audioTap = tap else {
+            print("[PlayerManager] Failed to create audio processing tap")
+            return
+        }
+
+        let audioMix = AVMutableAudioMix()
+        guard let audioTrack = playerItem.asset.tracks(withMediaType: .audio).first else {
+            print("[PlayerManager] No audio track found")
+            return
+        }
+        let audioMixInputParams = AVMutableAudioMixInputParameters(track: audioTrack)
+        audioMixInputParams.audioTapProcessor = audioTap
+        audioMix.inputParameters = [audioMixInputParams]
+        playerItem.audioMix = audioMix
+
+        print("[PlayerManager] Audio processing tap setup: EQ=\(enableEQ), Compensation=\(enableUpmixCompensation)")
     }
 
     private func waitForItemReady(autoPlay: Bool = true) async {
@@ -460,10 +559,24 @@ final class PlayerManager: ObservableObject {
                 if self.repeatMode == .one {
                     self.seek(to: 0)
                     self.player?.play()
+                } else if self.repeatMode == .off && self.isLastTrack {
+                    self.player?.pause()
+                    self.isPlaying = false
+                    self.updateNowPlayingInfo()
                 } else {
                     self.nextTrack()
                 }
             }
+    }
+
+    private var isLastTrack: Bool {
+        guard !queue.isEmpty else { return true }
+        if shuffleMode == .on {
+            guard let currentShuffled = shuffledIndices.firstIndex(of: currentIndex) else { return true }
+            return currentShuffled == shuffledIndices.count - 1
+        } else {
+            return currentIndex == queue.count - 1
+        }
     }
 
     private func setupAppStateObserver() {
@@ -482,6 +595,40 @@ final class PlayerManager: ObservableObject {
                             await self.loadArtwork(item: item, server: server)
                         }
                     }
+                }
+            }
+            .store(in: &cancellables)
+
+        // 监听音频会话中断（如来电、其他App播放音频、Siri等）
+        NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] notification in
+                guard let self = self,
+                      let userInfo = notification.userInfo,
+                      let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
+                      let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
+
+                switch type {
+                case .began:
+                    // 中断开始：暂停播放并更新状态
+                    self.player?.pause()
+                    self.isPlaying = false
+                    self.updateNowPlayingInfo()
+                    PlaybackMemoryManager.shared.saveCurrentSession()
+                    print("[PlayerManager] Audio interruption began, paused playback")
+                case .ended:
+                    // 中断结束：检查是否应该恢复播放
+                    if let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt {
+                        let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
+                        if options.contains(.shouldResume) {
+                            self.player?.play()
+                            self.isPlaying = true
+                            self.updateNowPlayingInfo()
+                            print("[PlayerManager] Audio interruption ended, resumed playback")
+                        }
+                    }
+                @unknown default:
+                    break
                 }
             }
             .store(in: &cancellables)

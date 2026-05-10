@@ -1718,8 +1718,13 @@ struct PlaybackSettingsSection: View {
     @AppStorage("playback_auto_restore") private var autoRestorePlayback = true
     @AppStorage("enableUpmix51") private var enableUpmix51 = false
     @AppStorage("enableVolumeBalance") private var enableVolumeBalance = false
+    @AppStorage("enableEQ") private var enableEQ = false
+    @AppStorage("enableFrontCompensation") private var enableFrontCompensation = true
+    @AppStorage("enableSurroundCompensation") private var enableSurroundCompensation = true
+    @AppStorage("enableLFECompensation") private var enableLFECompensation = true
     @State private var showUpmixAlert = false
     @State private var showVolumeBalanceAlert = false
+    @State private var showEQAlert = false
 
     var body: some View {
         Section(String(localized: "播放设置")) {
@@ -1732,7 +1737,7 @@ struct PlaybackSettingsSection: View {
 
             Toggle(isOn: $allowDirectPlay) {
                 HStack {
-                    Image(systemName: "waves")
+                    Image(systemName: "play.circle")
                     Text("直接播放")
                 }
             }
@@ -1750,7 +1755,7 @@ struct PlaybackSettingsSection: View {
             Toggle(isOn: $enableUpmix51) {
                 HStack {
                     Image(systemName: "speaker.wave.3")
-                    Text("立体声上混7.1.2")
+                    Text("强制立体声使用空间音频输出")
                 }
             }
             .onChange(of: enableUpmix51) {
@@ -1759,10 +1764,10 @@ struct PlaybackSettingsSection: View {
                 }
                 PlayerManager.shared.disableUpmixAndRestart()
             }
-            .alert("立体声上混7.1.2", isPresented: $showUpmixAlert) {
+            .alert("强制立体声使用空间音频输出", isPresented: $showUpmixAlert) {
                 Button("确定", role: .cancel) {}
             } message: {
-                Text("将立体声实时上混为 7.1.2 声道，纯内存处理零文件。系统自动路由到最佳输出。")
+                Text("开启后，立体声内容将通过系统空间音频处理输出，可能带来沉浸感提升，但也可能导致音质劣化。建议根据个人听感选择是否开启。")
             }
 
             if enableUpmix51 {
@@ -1783,6 +1788,45 @@ struct PlaybackSettingsSection: View {
                 } message: {
                     Text("将上混音量降低约 -10dB，与杜比全景声 (-18 LUFS) 响度标准保持一致。")
                 }
+
+                Toggle(isOn: $enableFrontCompensation) {
+                    HStack {
+                        Image(systemName: "speaker.wave.2")
+                        Text("前置补偿")
+                    }
+                }
+
+                Toggle(isOn: $enableSurroundCompensation) {
+                    HStack {
+                        Image(systemName: "speaker.wave.2.fill")
+                        Text("环绕补偿")
+                    }
+                }
+
+                Toggle(isOn: $enableLFECompensation) {
+                    HStack {
+                        Image(systemName: "speaker.wave.3")
+                        Text("LFE补偿")
+                    }
+                }
+            }
+
+            Toggle(isOn: $enableEQ) {
+                HStack {
+                    Image(systemName: "slider.vertical.3")
+                    Text("均衡器")
+                }
+            }
+            .onChange(of: enableEQ) {
+                RealtimeUpmixPlayer.shared.applyEQSettings()
+                if enableEQ {
+                    showEQAlert = true
+                }
+            }
+            .alert("均衡器", isPresented: $showEQAlert) {
+                Button("确定", role: .cancel) {}
+            } message: {
+                Text("启用均衡器处理，优化音频频率响应。")
             }
 
             Toggle(isOn: $autoRestorePlayback) {

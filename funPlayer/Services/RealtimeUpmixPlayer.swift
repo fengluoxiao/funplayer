@@ -22,8 +22,10 @@ class RealtimeUpmixPlayer: ObservableObject {
     private var engine: AVAudioEngine?
     private var playerNode: AVAudioPlayerNode?
     private var volumeMixer: AVAudioMixerNode?
+    private var eqNode: AVAudioUnitEQ?
     private var progressTimer: Timer?
     private var currentBuffer: AVAudioPCMBuffer?
+    private var isUpmixed = false
 
     private init() {}
 
@@ -64,7 +66,8 @@ class RealtimeUpmixPlayer: ObservableObject {
         guard url.isFileURL else { return }
         Task.detached(priority: .userInitiated) {
             let buf = await Self.process(url: url)
-            await MainActor.run { self.play(buf, fmt: buf?.format, autoPlay: autoPlay) }
+            let upmixed = buf?.format.channelCount == 6
+            await MainActor.run { self.play(buf, fmt: buf?.format, autoPlay: autoPlay, upmixed: upmixed) }
             if cleanupAfterProcessing { try? FileManager.default.removeItem(at: url) }
         }
     }
@@ -72,7 +75,8 @@ class RealtimeUpmixPlayer: ObservableObject {
     func playUpmixed(data: Data, fileHint: AudioFileTypeID, autoPlay: Bool) async -> Bool {
         stop()
         guard let buf = await Self.process(data: data, fileHint: fileHint) else { return false }
-        play(buf, fmt: buf.format, autoPlay: autoPlay)
+        let upmixed = buf.format.channelCount == 6
+        play(buf, fmt: buf.format, autoPlay: autoPlay, upmixed: upmixed)
         return true
     }
 
@@ -242,6 +246,12 @@ class RealtimeUpmixPlayer: ObservableObject {
         let tf = src.frameLength
         let sr = sampleRate > 0 ? sampleRate : 44100.0
 
+        // 只处理立体声（2声道），其他直接 bypass
+        guard sf.channelCount == 2 else {
+            print("[Upmix] Bypass: source is \(sf.channelCount) channel(s), not stereo")
+            return src
+        }
+
         guard let layout = make51Layout() else { return nil }
         let of = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sr, interleaved: false, channelLayout: layout)
         guard let dst = AVAudioPCMBuffer(pcmFormat: of, frameCapacity: tf) else { return nil }
@@ -253,40 +263,89 @@ class RealtimeUpmixPlayer: ObservableObject {
 
         guard let srcData = src.floatChannelData else { return nil }
         let sl = srcData[0]
-        let sr0 = sf.channelCount > 1 ? srcData[1] : sl
+        let sr0 = srcData[1]
 
         guard let dstData = dst.floatChannelData else { return nil }
         let fl = dstData[0]; let fr = dstData[1]
         let fc = dstData[2]; let lf = dstData[3]
         let bl = dstData[4]; let br = dstData[5]
 
-        let lfeGain: Float = 3.162
-        let surroundGain: Float = 0.35
-        let frontHighBoost: Float = 1.25
-        let surroundHighBoost: Float = 1.4
+        let enableFrontCompensation = UserDefaults.standard.bool(forKey: "enableFrontCompensation")
+        let enableSurroundCompensation = UserDefaults.standard.bool(forKey: "enableSurroundCompensation")
+        let enableLFECompensation = UserDefaults.standard.bool(forKey: "enableLFECompensation")
+
+        // 杜比5.1标准增益（相对前置声道）：
+        // L/R/C = 0dB, Ls/Rs = -3dB, LFE = +10dB
+        let lfeGain: Float = enableLFECompensation ? 3.162 : 1.0   // +10dB
+        let surroundGain: Float = enableSurroundCompensation ? 0.708 : 1.0  // -3dB
+        let frontHighBoost: Float = enableFrontCompensation ? 1.0 : 1.0
+        let surroundHighBoost: Float = enableSurroundCompensation ? 1.0 : 1.0
 
         for i in 0..<n {
-            let l = sl[i]; let r = sr0[i]; let c = (l + r) * 0.5
-            fl[i]=l * frontHighBoost; fr[i]=r * frontHighBoost; fc[i]=c * frontHighBoost
-            lf[i]=c * lfeGain
-            bl[i]=l * surroundGain * surroundHighBoost; br[i]=r * surroundGain * surroundHighBoost
+            let l = sl[i]; let r = sr0[i]
+
+            // === 前置左右：直接输出 ===
+            fl[i] = l * frontHighBoost
+            fr[i] = r * frontHighBoost
+
+            // === 中置：单声道内容，0dB ===
+            let mono = (l + r) * 0.5
+            fc[i] = mono * frontHighBoost
+
+            // === LFE：单声道内容，+10dB ===
+            lf[i] = mono * lfeGain
+
+            // === 环绕：差分信号，-3dB ===
+            let diffL = l - r
+            let diffR = r - l
+            bl[i] = diffL * 0.5 * surroundGain * surroundHighBoost
+            br[i] = diffR * 0.5 * surroundGain * surroundHighBoost
         }
 
         let dbLabel = enableVolumeBalance ? "-10dB" : "0dB"
-        print("[Upmix] 5.1 buffer: \(n) frames, \(sr)Hz, vol=\(dbLabel), LFE=+10dB, Surround=-9dB+HF+3dB, Front+2dB")
+        let lfeDb = enableLFECompensation ? "+10dB" : "0dB"
+        let surDb = enableSurroundCompensation ? "-3dB" : "0dB"
+        print("[Upmix] 5.1 buffer: \(n) frames, \(sr)Hz, vol=\(dbLabel), LFE=\(lfeDb), Surround=\(surDb), Front=0dB")
         return dst
     }
 
-    private func play(_ buf: AVAudioPCMBuffer?, fmt: AVAudioFormat?, autoPlay: Bool) {
+    private func play(_ buf: AVAudioPCMBuffer?, fmt: AVAudioFormat?, autoPlay: Bool, upmixed: Bool = false) {
         guard let b = buf, let f = fmt else { return }
         currentBuffer = b
+        isUpmixed = upmixed
         duration = Double(b.frameLength) / f.sampleRate
         currentTime = 0
 
         let ae = AVAudioEngine()
         let pn = AVAudioPlayerNode()
         ae.attach(pn)
-        ae.connect(pn, to: ae.outputNode, format: f)
+
+        let enableEQ = UserDefaults.standard.bool(forKey: "enableEQ")
+        let enableUpmixCompensation = UserDefaults.standard.bool(forKey: "enableUpmix51")
+        var lastNode: AVAudioNode = pn
+
+        if enableEQ {
+            let eq = AVAudioUnitEQ(numberOfBands: 10)
+            configureEQ(eq)
+            ae.attach(eq)
+            ae.connect(lastNode, to: eq, format: f)
+            lastNode = eq
+            eqNode = eq
+            print("[Upmix] EQ enabled")
+        } else {
+            eqNode = nil
+        }
+
+        if enableUpmixCompensation {
+            let masterEQ = AVAudioUnitEQ(numberOfBands: 5)
+            configureMasterEQ(masterEQ)
+            ae.attach(masterEQ)
+            ae.connect(lastNode, to: masterEQ, format: f)
+            lastNode = masterEQ
+            print("[Upmix] Master EQ compensation enabled")
+        }
+
+        ae.connect(lastNode, to: ae.outputNode, format: f)
         do { try ae.start() } catch {
             print("[Upmix] AVAudioEngine start failed: \(error)")
             return
@@ -301,7 +360,9 @@ class RealtimeUpmixPlayer: ObservableObject {
                 self.engine = nil
                 self.playerNode = nil
                 self.volumeMixer = nil
+                self.eqNode = nil
                 self.currentBuffer = nil
+                self.isUpmixed = false
                 self.currentTime = 0
                 self.duration = 0
                 self.onPlaybackEnd?()
@@ -309,13 +370,27 @@ class RealtimeUpmixPlayer: ObservableObject {
         }
         if autoPlay { pn.play() }
 
+        // 只有真正经过上混的立体声才应用音量补偿，bypass 时保持原音量
         let enableVolumeBalance = UserDefaults.standard.bool(forKey: "enableVolumeBalance")
-        pn.volume = enableVolumeBalance ? 0.316 : 1.0
+        pn.volume = (upmixed && enableVolumeBalance) ? 0.316 : 1.0
 
         engine = ae; playerNode = pn; volumeMixer = nil
-        print("[Upmix] Playing 5.1, vol=\(pn.volume), duration=\(duration)")
+        let modeLabel = upmixed ? "5.1" : "bypass"
+        print("[Upmix] Playing \(modeLabel), vol=\(pn.volume), duration=\(duration)")
 
         startProgressTimer()
+    }
+
+    private func configureEQ(_ eq: AVAudioUnitEQ) {
+        let frequencies: [Float] = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
+        for (i, band) in eq.bands.enumerated() {
+            guard i < frequencies.count else { break }
+            band.frequency = frequencies[i]
+            band.bypass = false
+            band.filterType = .parametric
+            band.gain = 0
+            band.bandwidth = 1.0
+        }
     }
 
     func togglePlayPause() {
@@ -375,15 +450,71 @@ class RealtimeUpmixPlayer: ObservableObject {
 
     func applyVolumeBalance() {
         let enableVolumeBalance = UserDefaults.standard.bool(forKey: "enableVolumeBalance")
-        playerNode?.volume = enableVolumeBalance ? 0.316 : 1.0
-        print("[Upmix] Volume balance: \(enableVolumeBalance ? "ON (-10dB)" : "OFF (0dB)"), player=\(playerNode != nil)")
+        // 只有真正经过上混的立体声才应用音量补偿，bypass 时保持原音量
+        playerNode?.volume = (isUpmixed && enableVolumeBalance) ? 0.316 : 1.0
+        print("[Upmix] Volume balance: \(enableVolumeBalance ? "ON (-10dB)" : "OFF (0dB)"), upmixed=\(isUpmixed), player=\(playerNode != nil)")
     }
 
     func stop() {
         stopProgressTimer()
         playerNode?.stop(); engine?.stop()
-        engine = nil; playerNode = nil; volumeMixer = nil
+        engine = nil; playerNode = nil; volumeMixer = nil; eqNode = nil
         currentBuffer = nil
+        isUpmixed = false
         currentTime = 0; duration = 0
+    }
+
+    func applyEQSettings() {
+        guard let eq = eqNode else { return }
+        let enableEQ = UserDefaults.standard.bool(forKey: "enableEQ")
+        for band in eq.bands {
+            band.bypass = !enableEQ
+        }
+        print("[Upmix] EQ \(enableEQ ? "enabled" : "bypassed")")
+    }
+
+    private func configureMasterEQ(_ eq: AVAudioUnitEQ) {
+        let enableFrontCompensation = UserDefaults.standard.bool(forKey: "enableFrontCompensation")
+        let enableSurroundCompensation = UserDefaults.standard.bool(forKey: "enableSurroundCompensation")
+        let enableLFECompensation = UserDefaults.standard.bool(forKey: "enableLFECompensation")
+
+        // 参考杜比影院规范:
+        // - Screen Speaker: 80Hz-16kHz ±3dB
+        // - Surround: 40Hz-16kHz +3/-6dB
+        // - LFE: 31.5-120Hz ±3dB
+
+        // Band 0: LFE Low Pass (120Hz, 符合杜比LFE规范)
+        eq.bands[0].frequency = 120
+        eq.bands[0].filterType = .lowPass
+        eq.bands[0].bypass = !enableLFECompensation
+        eq.bands[0].gain = 0
+
+        // Band 1: Front High Shelf (12kHz, +4dB, 大幅扩展高频响应)
+        eq.bands[1].frequency = 12000
+        eq.bands[1].filterType = .highShelf
+        eq.bands[1].bandwidth = 1.0
+        eq.bands[1].bypass = !enableFrontCompensation
+        eq.bands[1].gain = enableFrontCompensation ? 4.0 : 0
+
+        // Band 2: Front Presence Boost (4kHz, +3dB, 增加人声清晰度)
+        eq.bands[2].frequency = 4000
+        eq.bands[2].filterType = .parametric
+        eq.bands[2].bandwidth = 1.2
+        eq.bands[2].bypass = !enableFrontCompensation
+        eq.bands[2].gain = enableFrontCompensation ? 3.0 : 0
+
+        // Band 3: Surround High Boost (8kHz, +5dB, 补偿环绕高频衰减)
+        eq.bands[3].frequency = 8000
+        eq.bands[3].filterType = .parametric
+        eq.bands[3].bandwidth = 1.5
+        eq.bands[3].bypass = !enableSurroundCompensation
+        eq.bands[3].gain = enableSurroundCompensation ? 5.0 : 0
+
+        // Band 4: Surround Air Boost (16kHz, +3dB, 增加环绕空气感)
+        eq.bands[4].frequency = 16000
+        eq.bands[4].filterType = .highShelf
+        eq.bands[4].bandwidth = 1.0
+        eq.bands[4].bypass = !enableSurroundCompensation
+        eq.bands[4].gain = enableSurroundCompensation ? 3.0 : 0
     }
 }
