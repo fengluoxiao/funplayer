@@ -172,10 +172,33 @@ final class PlayerManager: ObservableObject {
     func applyVolumeBalance() {
         let enableVolumeBalance = UserDefaults.standard.bool(forKey: "enableVolumeBalance")
         let enableUpmix = UserDefaults.standard.bool(forKey: "enableUpmix51")
-        // 只有开启上混（系统空间化处理生效）时才应用音量补偿
-        let shouldApply = enableVolumeBalance && enableUpmix
+        
+        // 获取当前播放内容的声道数
+        let channelCount = getCurrentAudioChannelCount()
+        let isMultichannel = channelCount > 2
+        
+        // 只有开启上混且当前是立体声（2声道）时才应用音量补偿
+        // 多声道音源（如Dolby Atmos）直接bypass音量平衡
+        let shouldApply = enableVolumeBalance && enableUpmix && !isMultichannel
         player?.volume = shouldApply ? 0.316 : 1.0
-        print("[PlayerManager] Volume balance: \(shouldApply ? "ON (-10dB)" : "OFF (0dB)")")
+        print("[PlayerManager] Volume balance: \(shouldApply ? "ON (-10dB)" : "OFF (0dB)") (channels: \(channelCount))")
+    }
+    
+    private func getCurrentAudioChannelCount() -> Int {
+        guard let playerItem = player?.currentItem else { return 0 }
+        
+        // 获取音轨信息
+        let audioTracks = playerItem.asset.tracks(withMediaType: .audio)
+        guard let audioTrack = audioTracks.first else { return 0 }
+        
+        // 获取格式描述
+        let formatDescriptions = audioTrack.formatDescriptions
+        guard let formatDesc = formatDescriptions.first else { return 0 }
+        
+        // 从格式描述中获取声道数
+        guard let audioDesc = CMAudioFormatDescriptionGetStreamBasicDescription(formatDesc as! CMAudioFormatDescription) else { return 0 }
+        
+        return Int(audioDesc.pointee.mChannelsPerFrame)
     }
 
     private func playCurrentItemAsync(autoPlay: Bool) async {
@@ -241,7 +264,10 @@ final class PlayerManager: ObservableObject {
     }
 
     func togglePlayPause() {
-        guard player != nil else { return }
+        if player == nil {
+            playCurrentItem()
+            return
+        }
         if isPlaying {
             player?.pause()
             isPlaying = false
@@ -275,8 +301,13 @@ final class PlayerManager: ObservableObject {
 
     func previousTrack() {
         guard !queue.isEmpty else { return }
-        if currentTime > 3 {
+        if currentTime > 3 && player != nil {
             seek(to: 0)
+            if !isPlaying {
+                player?.play()
+                isPlaying = true
+                updateNowPlayingInfo()
+            }
             return
         }
         reportPlaybackStopped()
@@ -298,6 +329,18 @@ final class PlayerManager: ObservableObject {
     }
 
     func seek(to progress: Double) {
+        if player == nil {
+            Task {
+                await prepareCurrentItem()
+                await MainActor.run {
+                    self.player?.seek(to: CMTime(seconds: progress * self.duration, preferredTimescale: 600))
+                    self.player?.play()
+                    self.isPlaying = true
+                    self.updateNowPlayingInfo()
+                }
+            }
+            return
+        }
         guard let player = player else { return }
         let targetTime = CMTime(seconds: progress * duration, preferredTimescale: 600)
         player.seek(to: targetTime) { [weak self] _ in
@@ -310,6 +353,10 @@ final class PlayerManager: ObservableObject {
     }
 
     func skipForward(seconds: Double = 10) {
+        if player == nil {
+            seek(to: min(seconds / max(duration, 1), 1.0))
+            return
+        }
         guard let player = player else { return }
         let newTime = min(player.currentTime().seconds + seconds, duration)
         player.seek(to: CMTime(seconds: newTime, preferredTimescale: 600))
@@ -317,6 +364,10 @@ final class PlayerManager: ObservableObject {
     }
 
     func skipBackward(seconds: Double = 10) {
+        if player == nil {
+            seek(to: 0)
+            return
+        }
         guard let player = player else { return }
         let newTime = max(player.currentTime().seconds - seconds, 0)
         player.seek(to: CMTime(seconds: newTime, preferredTimescale: 600))
@@ -353,6 +404,8 @@ final class PlayerManager: ObservableObject {
         player?.pause()
         player = nil
         cancellables.removeAll()
+        endBackgroundPlaybackTask()
+        stopKeepAliveTimer()
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
         currentItem = nil
         currentServer = nil
@@ -383,15 +436,17 @@ final class PlayerManager: ObservableObject {
         do {
             let session = AVAudioSession.sharedInstance()
             let enableUpmix = UserDefaults.standard.bool(forKey: "enableUpmix51")
-            
+
             // 上混开启时使用 moviePlayback 模式以启用空间音频，关闭时使用 default 模式保持普通立体声
             let mode: AVAudioSession.Mode = enableUpmix ? .moviePlayback : .default
-            try session.setCategory(.playback, mode: mode, options: [])
-            
+            // 使用 mixWithOthers 选项，避免被其他音频App强制打断时丢失会话
+            // duckOthers 会在其他音频播放时自动降低音量，保持后台播放
+            try session.setCategory(.playback, mode: mode, options: [.mixWithOthers, .duckOthers])
+
             if #available(iOS 15.0, *) {
                 try? session.setSupportsMultichannelContent(enableUpmix)
             }
-            
+
             try session.setActive(true)
             print("[PlayerManager] Audio session configured: mode=\(mode.rawValue), multichannel=\(enableUpmix)")
         } catch {
@@ -417,11 +472,21 @@ final class PlayerManager: ObservableObject {
         } else {
             player = AVPlayer(playerItem: playerItem)
         }
-        
+
+        // 配置后台播放行为：防止在后台缓冲时被系统暂停
+        player?.preventsDisplaySleepDuringVideoPlayback = false
+
         applyVolumeBalance()
 
         await waitForItemReady(autoPlay: autoPlay)
         addTimeObserver()
+        setupPlaybackEndObserver()
+
+        // 如果正在播放，确保后台保活机制已启动
+        if autoPlay && UIApplication.shared.applicationState == .background {
+            beginBackgroundPlaybackTask()
+            startKeepAliveTimer()
+        }
     }
 
     private func setupAudioProcessingTap(for playerItem: AVPlayerItem) {
@@ -547,6 +612,43 @@ final class PlayerManager: ObservableObject {
     private var memorySaveTask: Task<Void, Never>?
     private var lastMemorySaveTime: Double = 0
 
+    // MARK: - Background Keep-Alive
+    private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+    private var keepAliveTimer: Timer?
+
+    private func beginBackgroundPlaybackTask() {
+        endBackgroundPlaybackTask()
+        backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "funPlayer.playback") { [weak self] in
+            self?.endBackgroundPlaybackTask()
+        }
+        print("[PlayerManager] Background task began: \(backgroundTask.rawValue)")
+    }
+
+    private func endBackgroundPlaybackTask() {
+        guard backgroundTask != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(backgroundTask)
+        print("[PlayerManager] Background task ended: \(backgroundTask.rawValue)")
+        backgroundTask = .invalid
+    }
+
+    private func startKeepAliveTimer() {
+        stopKeepAliveTimer()
+        let timer = Timer(timeInterval: 15, repeats: true) { [weak self] _ in
+            guard let self = self, self.isPlaying else { return }
+            self.beginBackgroundPlaybackTask()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+                self?.endBackgroundPlaybackTask()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        keepAliveTimer = timer
+    }
+
+    private func stopKeepAliveTimer() {
+        keepAliveTimer?.invalidate()
+        keepAliveTimer = nil
+    }
+
     private func setupPlaybackEndObserver() {
         playbackEndCancellable = NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)
             .receive(on: DispatchQueue.main)
@@ -562,7 +664,11 @@ final class PlayerManager: ObservableObject {
                 } else if self.repeatMode == .off && self.isLastTrack {
                     self.player?.pause()
                     self.isPlaying = false
+                    self.currentTime = 0
+                    self.progress = 0
                     self.updateNowPlayingInfo()
+                    self.removeTimeObserver()
+                    self.player = nil
                 } else {
                     self.nextTrack()
                 }
@@ -580,10 +686,29 @@ final class PlayerManager: ObservableObject {
     }
 
     private func setupAppStateObserver() {
+        // App进入后台：启动后台任务保活
+        NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self = self else { return }
+                if self.isPlaying {
+                    self.beginBackgroundPlaybackTask()
+                    self.startKeepAliveTimer()
+                    print("[PlayerManager] App entered background, started keep-alive")
+                }
+                // 进入后台时立即保存一次播放进度
+                PlaybackMemoryManager.shared.saveCurrentSession()
+            }
+            .store(in: &cancellables)
+
+        // App即将进入前台
         NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 guard let self = self else { return }
+                self.endBackgroundPlaybackTask()
+                self.stopKeepAliveTimer()
+                print("[PlayerManager] App will enter foreground, stopped keep-alive")
                 // App即将进入前台时，如果currentArtwork为nil但有播放项，尝试恢复封面
                 if self.currentArtwork == nil, let item = self.currentItem {
                     // 优先从缓存恢复
@@ -594,6 +719,22 @@ final class PlayerManager: ObservableObject {
                         Task {
                             await self.loadArtwork(item: item, server: server)
                         }
+                    }
+                }
+            }
+            .store(in: &cancellables)
+
+        // 监听系统内存警告
+        NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self = self else { return }
+                print("[PlayerManager] Memory warning received, saving session and keeping player alive")
+                PlaybackMemoryManager.shared.saveCurrentSession()
+                // 内存警告时保持音频会话活跃，防止被系统清理
+                if self.isPlaying {
+                    Task {
+                        await self.setupAudioSession()
                     }
                 }
             }
