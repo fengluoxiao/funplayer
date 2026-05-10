@@ -377,8 +377,8 @@ class RealtimeUpmixPlayer: ObservableObject {
         let isMultichannel = f.channelCount > 2
         let shouldUseSpatialAudio = upmixed || (enableCustomSpatialAudio && isMultichannel)
 
-        if shouldUseSpatialAudio && upmixed {
-            // 使用 AVAudioEnvironmentNode 进行3D空间化
+        if shouldUseSpatialAudio {
+            // 使用 AVAudioEnvironmentNode 进行3D空间化（上混或多声道都走这里）
             playWithEnvironmentNode(b: b, f: f, autoPlay: autoPlay, upmixed: upmixed)
         } else {
             // 使用传统方式播放
@@ -389,7 +389,20 @@ class RealtimeUpmixPlayer: ObservableObject {
     private func playWithEnvironmentNode(b: AVAudioPCMBuffer, f: AVAudioFormat, autoPlay: Bool, upmixed: Bool) {
         let ae = AVAudioEngine()
         let envNode = AVAudioEnvironmentNode()
-        envNode.renderingAlgorithm = .HRTFHQ
+        envNode.renderingAlgorithm = .sphericalHead
+
+        // === 距离衰减配置：模拟近场监听，减少"远"的感觉 ===
+        let distParams = envNode.distanceAttenuationParameters
+        distParams.distanceAttenuationModel = .inverse
+        distParams.referenceDistance = 2.0   // 2米内几乎不衰减
+        distParams.maximumDistance = 10.0    // 超过10米后不再衰减
+        distParams.rolloffFactor = 0.3       // 衰减曲线很平缓（默认1.0）
+
+        // === 混响配置：减少混响，让声音更"干"更贴近 ===
+        let reverbParams = envNode.reverbParameters
+        reverbParams.enable = true
+        reverbParams.level = -20.0           // 混响电平很低（默认0dB）
+
         ae.attach(envNode)
         ae.connect(envNode, to: ae.outputNode, format: nil)
 
@@ -397,29 +410,67 @@ class RealtimeUpmixPlayer: ObservableObject {
         let channelBuffers = extractChannels(from: b)
         var players: [AVAudioPlayerNode] = []
 
-        // 定义7.1.4各声道的3D位置（基于Apple空间音频坐标系和杜比标准）
+        // 根据声道数选择对应的3D位置映射
         // 坐标系：右手系，+X=右，+Y=上，+Z=前，单位：米
-        let positions: [(AVAudio3DPoint, Float)] = [
-            (AVAudio3DPoint(x: -1.0, y: 0.0, z: 1.0), 1.0),    // Front Left
-            (AVAudio3DPoint(x: 1.0, y: 0.0, z: 1.0), 1.0),     // Front Right
-            (AVAudio3DPoint(x: 0.0, y: 0.0, z: 1.0), 0.8),     // Center
-            (AVAudio3DPoint(x: 0.0, y: -0.5, z: 0.5), 1.5),    // LFE (下方)
-            (AVAudio3DPoint(x: -1.5, y: 0.0, z: 0.0), 0.6),    // Side Left
-            (AVAudio3DPoint(x: 1.5, y: 0.0, z: 0.0), 0.6),     // Side Right
-            (AVAudio3DPoint(x: -1.0, y: 0.0, z: -1.0), 0.5),   // Rear Left
-            (AVAudio3DPoint(x: 1.0, y: 0.0, z: -1.0), 0.5),    // Rear Right
-            (AVAudio3DPoint(x: -0.7, y: 0.7, z: 0.7), 0.35),   // Top Front Left (45度)
-            (AVAudio3DPoint(x: 0.7, y: 0.7, z: 0.7), 0.35),    // Top Front Right (45度)
-            (AVAudio3DPoint(x: -0.7, y: 0.7, z: -0.7), 0.3),   // Top Rear Left (45度)
-            (AVAudio3DPoint(x: 0.7, y: 0.7, z: -0.7), 0.3)     // Top Rear Right (45度)
-        ]
+        // 距离调整：模拟真实家庭影院/耳机近场，扬声器距离0.5-1.0米
+        let positions: [(AVAudio3DPoint, Float)]
+        let channelCount = Int(b.format.channelCount)
+
+        if upmixed || channelCount == 12 {
+            // 7.1.4 布局（上混后的12声道）
+            positions = [
+                (AVAudio3DPoint(x: -0.5, y: 0.0, z: 0.5), 1.0),    // Front Left
+                (AVAudio3DPoint(x: 0.5, y: 0.0, z: 0.5), 1.0),     // Front Right
+                (AVAudio3DPoint(x: 0.0, y: 0.0, z: 0.6), 0.9),     // Center
+                (AVAudio3DPoint(x: 0.0, y: -0.3, z: 0.4), 1.5),    // LFE
+                (AVAudio3DPoint(x: -0.7, y: 0.0, z: 0.0), 0.7),    // Side Left
+                (AVAudio3DPoint(x: 0.7, y: 0.0, z: 0.0), 0.7),     // Side Right
+                (AVAudio3DPoint(x: -0.5, y: 0.0, z: -0.5), 0.6),   // Rear Left
+                (AVAudio3DPoint(x: 0.5, y: 0.0, z: -0.5), 0.6),    // Rear Right
+                (AVAudio3DPoint(x: -0.4, y: 0.5, z: 0.4), 0.5),    // Top Front Left
+                (AVAudio3DPoint(x: 0.4, y: 0.5, z: 0.4), 0.5),     // Top Front Right
+                (AVAudio3DPoint(x: -0.4, y: 0.5, z: -0.4), 0.45),  // Top Rear Left
+                (AVAudio3DPoint(x: 0.4, y: 0.5, z: -0.4), 0.45)    // Top Rear Right
+            ]
+        } else if channelCount == 6 {
+            // 5.1 布局
+            positions = [
+                (AVAudio3DPoint(x: -0.5, y: 0.0, z: 0.5), 1.0),    // Front Left
+                (AVAudio3DPoint(x: 0.5, y: 0.0, z: 0.5), 1.0),     // Front Right
+                (AVAudio3DPoint(x: 0.0, y: 0.0, z: 0.6), 0.9),     // Center
+                (AVAudio3DPoint(x: 0.0, y: -0.3, z: 0.4), 1.5),    // LFE
+                (AVAudio3DPoint(x: -0.5, y: 0.0, z: -0.5), 0.6),   // Rear Left
+                (AVAudio3DPoint(x: 0.5, y: 0.0, z: -0.5), 0.6)     // Rear Right
+            ]
+        } else if channelCount == 8 {
+            // 7.1 布局
+            positions = [
+                (AVAudio3DPoint(x: -0.5, y: 0.0, z: 0.5), 1.0),    // Front Left
+                (AVAudio3DPoint(x: 0.5, y: 0.0, z: 0.5), 1.0),     // Front Right
+                (AVAudio3DPoint(x: 0.0, y: 0.0, z: 0.6), 0.9),     // Center
+                (AVAudio3DPoint(x: 0.0, y: -0.3, z: 0.4), 1.5),    // LFE
+                (AVAudio3DPoint(x: -0.7, y: 0.0, z: 0.0), 0.7),    // Side Left
+                (AVAudio3DPoint(x: 0.7, y: 0.0, z: 0.0), 0.7),     // Side Right
+                (AVAudio3DPoint(x: -0.5, y: 0.0, z: -0.5), 0.6),   // Rear Left
+                (AVAudio3DPoint(x: 0.5, y: 0.0, z: -0.5), 0.6)     // Rear Right
+            ]
+        } else {
+            // 其他声道数，按顺序映射到前置位置
+            positions = (0..<channelCount).map { i -> (AVAudio3DPoint, Float) in
+                let angle = Float(i) / Float(channelCount) * 2.0 * .pi
+                let x = sin(angle) * 0.5
+                let z = cos(angle) * 0.5
+                return (AVAudio3DPoint(x: x, y: 0.0, z: z), 1.0)
+            }
+        }
 
         for (index, channelBuf) in channelBuffers.enumerated() {
             guard index < positions.count else { break }
             let player = AVAudioPlayerNode()
             player.position = positions[index].0
-            player.renderingAlgorithm = .HRTFHQ
+            player.renderingAlgorithm = .sphericalHead
             player.volume = positions[index].1
+            player.sourceMode = .bypass   // 不应用额外的环境效果
             ae.attach(player)
             ae.connect(player, to: envNode, format: channelBuf.format)
             player.scheduleBuffer(channelBuf, at: nil, options: .loops, completionHandler: nil)
@@ -442,7 +493,8 @@ class RealtimeUpmixPlayer: ObservableObject {
         playerNode = players.first
 
         let dbLabel = UserDefaults.standard.bool(forKey: "enableVolumeBalance") ? "-10dB" : "0dB"
-        print("[Upmix] Playing with EnvironmentNode 7.1.4, vol=\(dbLabel)")
+        let layoutName = upmixed ? "7.1.4(upmixed)" : (channelCount == 6 ? "5.1" : (channelCount == 8 ? "7.1" : "\(channelCount)ch"))
+        print("[Upmix] Playing with EnvironmentNode \(layoutName), vol=\(dbLabel), refDist=2.0m, rolloff=0.3")
         startProgressTimer()
     }
 
