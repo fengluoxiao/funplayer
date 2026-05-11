@@ -10,10 +10,27 @@ import MediaPlayer
 import SwiftUI
 import AudioToolbox
 
-enum RepeatMode: CaseIterable {
+enum RepeatMode: CaseIterable, RawRepresentable {
     case off
     case all
     case one
+
+    var rawValue: String {
+        switch self {
+        case .off: return "off"
+        case .all: return "all"
+        case .one: return "one"
+        }
+    }
+
+    init?(rawValue: String) {
+        switch rawValue {
+        case "off": self = .off
+        case "all": self = .all
+        case "one": self = .one
+        default: return nil
+        }
+    }
 
     var icon: String {
         switch self {
@@ -24,9 +41,24 @@ enum RepeatMode: CaseIterable {
     }
 }
 
-enum ShuffleMode: CaseIterable {
+enum ShuffleMode: CaseIterable, RawRepresentable {
     case off
     case on
+
+    var rawValue: String {
+        switch self {
+        case .off: return "off"
+        case .on: return "on"
+        }
+    }
+
+    init?(rawValue: String) {
+        switch rawValue {
+        case "off": self = .off
+        case "on": self = .on
+        default: return nil
+        }
+    }
 
     var icon: String {
         switch self {
@@ -48,8 +80,16 @@ final class PlayerManager: ObservableObject {
     @Published var progress: Double = 0
     @Published var isLoading = false
     @Published var errorMessage: String?
-    @Published var repeatMode: RepeatMode = .off
-    @Published var shuffleMode: ShuffleMode = .off
+    @Published var repeatMode: RepeatMode = .off {
+        didSet {
+            UserDefaults.standard.set(repeatMode.rawValue, forKey: "repeatMode")
+        }
+    }
+    @Published var shuffleMode: ShuffleMode = .off {
+        didSet {
+            UserDefaults.standard.set(shuffleMode.rawValue, forKey: "shuffleMode")
+        }
+    }
     @Published var showFullScreenPlayer = false
     @Published var showPlaylist = false
     @Published var accentColor: Color = Color(UIColor.systemBlue)
@@ -65,6 +105,14 @@ final class PlayerManager: ObservableObject {
     var shuffledIndices: [Int] = []
 
     private init() {
+        if let savedRepeat = UserDefaults.standard.string(forKey: "repeatMode"),
+           let mode = RepeatMode(rawValue: savedRepeat) {
+            repeatMode = mode
+        }
+        if let savedShuffle = UserDefaults.standard.string(forKey: "shuffleMode"),
+           let mode = ShuffleMode(rawValue: savedShuffle) {
+            shuffleMode = mode
+        }
         setupRemoteCommands()
         setupPlaybackEndObserver()
         setupAppStateObserver()
