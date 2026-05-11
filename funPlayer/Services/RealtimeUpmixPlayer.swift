@@ -394,19 +394,18 @@ class RealtimeUpmixPlayer: ObservableObject {
         let envNode = AVAudioEnvironmentNode()
         envNode.renderingAlgorithm = .sphericalHead
 
-        // === 距离衰减配置：模拟近场监听，减少"远"的感觉 ===
+        // === 距离衰减配置：模拟录音棚近场监听 ===
         let distParams = envNode.distanceAttenuationParameters
         distParams.distanceAttenuationModel = .inverse
-        distParams.referenceDistance = 2.0   // 2米内几乎不衰减
-        distParams.maximumDistance = 10.0    // 超过10米后不再衰减
-        distParams.rolloffFactor = 0.3       // 衰减曲线很平缓（默认1.0）
+        distParams.referenceDistance = 1.0   // 1米内不衰减（近场监听标准距离）
+        distParams.maximumDistance = 3.0     // 超过3米后不再衰减
+        distParams.rolloffFactor = 0.1       // 极平缓衰减，接近无衰减
 
-        // === 混响配置：根据声道数调整混响 ===
+        // === 混响配置：录音棚近场监听环境应极"干" ===
         let reverbParams = envNode.reverbParameters
         reverbParams.enable = true
-        // 立体声用-50dB保留轻微空间感，多声道用-96dB几乎无混响
-        let channelCountForReverb = PlayerManager.shared.getCurrentAudioChannelCount(format: b.format)
-        reverbParams.level = (channelCountForReverb == 2) ? -50.0 : -96.0
+        // 近场监听要求极低的混响，模拟消声室/录音棚控制室
+        reverbParams.level = -96.0
 
         ae.attach(envNode)
         ae.connect(envNode, to: ae.outputNode, format: nil)
@@ -423,48 +422,49 @@ class RealtimeUpmixPlayer: ObservableObject {
 
         if upmixed || channelCount == 12 {
             // 7.1.4 布局（上混后的12声道）
+            // 模拟耳机/近场监听：扬声器距离 0.3-0.5 米
             positions = [
-                (AVAudio3DPoint(x: -0.5, y: 0.0, z: 0.5), 1.0),    // Front Left
-                (AVAudio3DPoint(x: 0.5, y: 0.0, z: 0.5), 1.0),     // Front Right
-                (AVAudio3DPoint(x: 0.0, y: 0.0, z: 0.6), 0.9),     // Center
-                (AVAudio3DPoint(x: 0.0, y: -0.3, z: 0.4), 1.5),    // LFE
-                (AVAudio3DPoint(x: -0.7, y: 0.0, z: 0.0), 0.7),    // Side Left
-                (AVAudio3DPoint(x: 0.7, y: 0.0, z: 0.0), 0.7),     // Side Right
-                (AVAudio3DPoint(x: -0.5, y: 0.0, z: -0.5), 0.6),   // Rear Left
-                (AVAudio3DPoint(x: 0.5, y: 0.0, z: -0.5), 0.6),    // Rear Right
-                (AVAudio3DPoint(x: -0.4, y: 0.5, z: 0.4), 0.5),    // Top Front Left
-                (AVAudio3DPoint(x: 0.4, y: 0.5, z: 0.4), 0.5),     // Top Front Right
-                (AVAudio3DPoint(x: -0.4, y: 0.5, z: -0.4), 0.45),  // Top Rear Left
-                (AVAudio3DPoint(x: 0.4, y: 0.5, z: -0.4), 0.45)    // Top Rear Right
+                (AVAudio3DPoint(x: -0.3, y: 0.0, z: 0.3), 1.0),    // Front Left (0.42m)
+                (AVAudio3DPoint(x: 0.3, y: 0.0, z: 0.3), 1.0),     // Front Right (0.42m)
+                (AVAudio3DPoint(x: 0.0, y: 0.0, z: 0.35), 0.9),    // Center (0.35m)
+                (AVAudio3DPoint(x: 0.0, y: -0.2, z: 0.25), 1.5),   // LFE (下方，0.32m)
+                (AVAudio3DPoint(x: -0.4, y: 0.0, z: 0.0), 0.7),    // Side Left (0.4m)
+                (AVAudio3DPoint(x: 0.4, y: 0.0, z: 0.0), 0.7),     // Side Right (0.4m)
+                (AVAudio3DPoint(x: -0.3, y: 0.0, z: -0.3), 0.6),   // Rear Left (0.42m)
+                (AVAudio3DPoint(x: 0.3, y: 0.0, z: -0.3), 0.6),    // Rear Right (0.42m)
+                (AVAudio3DPoint(x: -0.25, y: 0.3, z: 0.25), 0.5),  // Top Front Left (0.43m)
+                (AVAudio3DPoint(x: 0.25, y: 0.3, z: 0.25), 0.5),   // Top Front Right (0.43m)
+                (AVAudio3DPoint(x: -0.25, y: 0.3, z: -0.25), 0.45), // Top Rear Left (0.43m)
+                (AVAudio3DPoint(x: 0.25, y: 0.3, z: -0.25), 0.45)  // Top Rear Right (0.43m)
             ]
         } else if channelCount == 6 {
             // 5.1 布局
             positions = [
-                (AVAudio3DPoint(x: -0.5, y: 0.0, z: 0.5), 1.0),    // Front Left
-                (AVAudio3DPoint(x: 0.5, y: 0.0, z: 0.5), 1.0),     // Front Right
-                (AVAudio3DPoint(x: 0.0, y: 0.0, z: 0.6), 0.9),     // Center
-                (AVAudio3DPoint(x: 0.0, y: -0.3, z: 0.4), 1.5),    // LFE
-                (AVAudio3DPoint(x: -0.5, y: 0.0, z: -0.5), 0.6),   // Rear Left
-                (AVAudio3DPoint(x: 0.5, y: 0.0, z: -0.5), 0.6)     // Rear Right
+                (AVAudio3DPoint(x: -0.3, y: 0.0, z: 0.3), 1.0),    // Front Left
+                (AVAudio3DPoint(x: 0.3, y: 0.0, z: 0.3), 1.0),     // Front Right
+                (AVAudio3DPoint(x: 0.0, y: 0.0, z: 0.35), 0.9),    // Center
+                (AVAudio3DPoint(x: 0.0, y: -0.2, z: 0.25), 1.5),   // LFE
+                (AVAudio3DPoint(x: -0.3, y: 0.0, z: -0.3), 0.6),   // Rear Left
+                (AVAudio3DPoint(x: 0.3, y: 0.0, z: -0.3), 0.6)     // Rear Right
             ]
         } else if channelCount == 8 {
             // 7.1 布局
             positions = [
-                (AVAudio3DPoint(x: -0.5, y: 0.0, z: 0.5), 1.0),    // Front Left
-                (AVAudio3DPoint(x: 0.5, y: 0.0, z: 0.5), 1.0),     // Front Right
-                (AVAudio3DPoint(x: 0.0, y: 0.0, z: 0.6), 0.9),     // Center
-                (AVAudio3DPoint(x: 0.0, y: -0.3, z: 0.4), 1.5),    // LFE
-                (AVAudio3DPoint(x: -0.7, y: 0.0, z: 0.0), 0.7),    // Side Left
-                (AVAudio3DPoint(x: 0.7, y: 0.0, z: 0.0), 0.7),     // Side Right
-                (AVAudio3DPoint(x: -0.5, y: 0.0, z: -0.5), 0.6),   // Rear Left
-                (AVAudio3DPoint(x: 0.5, y: 0.0, z: -0.5), 0.6)     // Rear Right
+                (AVAudio3DPoint(x: -0.3, y: 0.0, z: 0.3), 1.0),    // Front Left
+                (AVAudio3DPoint(x: 0.3, y: 0.0, z: 0.3), 1.0),     // Front Right
+                (AVAudio3DPoint(x: 0.0, y: 0.0, z: 0.35), 0.9),    // Center
+                (AVAudio3DPoint(x: 0.0, y: -0.2, z: 0.25), 1.5),   // LFE
+                (AVAudio3DPoint(x: -0.4, y: 0.0, z: 0.0), 0.7),    // Side Left
+                (AVAudio3DPoint(x: 0.4, y: 0.0, z: 0.0), 0.7),     // Side Right
+                (AVAudio3DPoint(x: -0.3, y: 0.0, z: -0.3), 0.6),   // Rear Left
+                (AVAudio3DPoint(x: 0.3, y: 0.0, z: -0.3), 0.6)     // Rear Right
             ]
         } else {
             // 其他声道数，按顺序映射到前置位置
             positions = (0..<channelCount).map { i -> (AVAudio3DPoint, Float) in
                 let angle = Float(i) / Float(channelCount) * 2.0 * .pi
-                let x = sin(angle) * 0.5
-                let z = cos(angle) * 0.5
+                let x = sin(angle) * 0.3
+                let z = cos(angle) * 0.3
                 return (AVAudio3DPoint(x: x, y: 0.0, z: z), 1.0)
             }
         }
@@ -546,7 +546,7 @@ class RealtimeUpmixPlayer: ObservableObject {
         }
 
         if enableUpmixCompensation {
-            let masterEQ = AVAudioUnitEQ(numberOfBands: 5)
+            let masterEQ = AVAudioUnitEQ(numberOfBands: 7)
             configureMasterEQ(masterEQ)
             ae.attach(masterEQ)
             ae.connect(lastNode, to: masterEQ, format: f)
@@ -694,9 +694,11 @@ class RealtimeUpmixPlayer: ObservableObject {
         let enableSurroundCompensation = UserDefaults.standard.bool(forKey: "enableSurroundCompensation")
         let enableLFECompensation = UserDefaults.standard.bool(forKey: "enableLFECompensation")
 
-        // 参考 Sony Dolby Atmos 官方 10段 EQ 频率:
-        // 47, 230, 470, 840, 1.3k, 2.3k, 3.8k, 5.8k, 9k, 14k Hz
-        // 针对耳机优化，避免低频堆积和高频刺耳
+        // 参考虚拟环绕声/空间音频耳机 EQ 推荐:
+        // 1. 降低 <100Hz 防止浑浊
+        // 2. 提升 1-3kHz 人声清晰度
+        // 3. 提升 8-12kHz 细节和空间感
+        // 4. 补偿 AirPods 2-6kHz 凹陷
 
         // Band 0: LFE Low Pass (120Hz, 符合杜比LFE规范)
         eq.bands[0].frequency = 120
@@ -704,33 +706,47 @@ class RealtimeUpmixPlayer: ObservableObject {
         eq.bands[0].bypass = !enableLFECompensation
         eq.bands[0].gain = 0
 
-        // Band 1: Front Low Cut (80Hz, -2dB, 减少前置低频堆积)
-        eq.bands[1].frequency = 80
+        // Band 1: Sub-bass Cut (60Hz, -3dB, 减少浑浊感)
+        eq.bands[1].frequency = 60
         eq.bands[1].filterType = .parametric
         eq.bands[1].bandwidth = 1.5
         eq.bands[1].bypass = !enableFrontCompensation
-        eq.bands[1].gain = enableFrontCompensation ? -2.0 : 0
+        eq.bands[1].gain = enableFrontCompensation ? -3.0 : 0
 
-        // Band 2: Front Presence Boost (2.3kHz, +2dB, 增强人声清晰度)
-        eq.bands[2].frequency = 2300
+        // Band 2: Low-mid Cut (250Hz, -2dB, 减少 boxy 感)
+        eq.bands[2].frequency = 250
         eq.bands[2].filterType = .parametric
         eq.bands[2].bandwidth = 1.2
         eq.bands[2].bypass = !enableFrontCompensation
-        eq.bands[2].gain = enableFrontCompensation ? 2.0 : 0
+        eq.bands[2].gain = enableFrontCompensation ? -2.0 : 0
 
-        // Band 3: Surround High Boost (5.8kHz, +3dB, 补偿环绕高频衰减)
-        eq.bands[3].frequency = 5800
+        // Band 3: Presence Boost (2.5kHz, +3dB, 增强人声清晰度)
+        eq.bands[3].frequency = 2500
         eq.bands[3].filterType = .parametric
-        eq.bands[3].bandwidth = 1.5
-        eq.bands[3].bypass = !enableSurroundCompensation
-        eq.bands[3].gain = enableSurroundCompensation ? 3.0 : 0
+        eq.bands[3].bandwidth = 1.0
+        eq.bands[3].bypass = !enableFrontCompensation
+        eq.bands[3].gain = enableFrontCompensation ? 3.0 : 0
 
-        // Band 4: Surround Air Boost (14kHz, +2dB, 增加环绕空气感)
-        eq.bands[4].frequency = 14000
-        eq.bands[4].filterType = .highShelf
-        eq.bands[4].bandwidth = 1.0
-        eq.bands[4].bypass = !enableSurroundCompensation
-        eq.bands[4].gain = enableSurroundCompensation ? 2.0 : 0
+        // Band 4: Upper-mid Boost (4kHz, +2dB, 补偿 AirPods 凹陷)
+        eq.bands[4].frequency = 4000
+        eq.bands[4].filterType = .parametric
+        eq.bands[4].bandwidth = 1.2
+        eq.bands[4].bypass = !enableFrontCompensation
+        eq.bands[4].gain = enableFrontCompensation ? 2.0 : 0
+
+        // Band 5: High Detail Boost (8kHz, +3dB, 增强细节和空间感)
+        eq.bands[5].frequency = 8000
+        eq.bands[5].filterType = .parametric
+        eq.bands[5].bandwidth = 1.5
+        eq.bands[5].bypass = !enableSurroundCompensation
+        eq.bands[5].gain = enableSurroundCompensation ? 3.0 : 0
+
+        // Band 6: Air Boost (12kHz, +2dB, 增加空气感)
+        eq.bands[6].frequency = 12000
+        eq.bands[6].filterType = .highShelf
+        eq.bands[6].bandwidth = 1.0
+        eq.bands[6].bypass = !enableSurroundCompensation
+        eq.bands[6].gain = enableSurroundCompensation ? 2.0 : 0
     }
 
     private func setupSpatialMixer(engine: AVAudioEngine, lastNode: AVAudioNode, inputFormat: AVAudioFormat, completion: @escaping (Bool) -> Void) {
