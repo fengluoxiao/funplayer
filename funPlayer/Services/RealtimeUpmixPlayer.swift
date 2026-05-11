@@ -374,16 +374,11 @@ class RealtimeUpmixPlayer: ObservableObject {
         duration = Double(b.frameLength) / f.sampleRate
         currentTime = 0
 
-        let enableCustomSpatialAudio = UserDefaults.standard.bool(forKey: "enableUpmix51")
-        let channelCount = PlayerManager.shared.getCurrentAudioChannelCount(format: f)
-        let isMultichannel = channelCount > 2
-        let shouldUseSpatialAudio = upmixed || (enableCustomSpatialAudio && isMultichannel)
-
-        if shouldUseSpatialAudio {
-            // 使用 AUSpatialMixer 进行空间化（Apple 官方推荐方式）
+        // 只有上混后的音频（立体声→多声道）才走 AUSpatialMixer
+        // 原生多声道直接走传统播放（系统处理）
+        if upmixed {
             playWithSpatialMixer(b: b, f: f, autoPlay: autoPlay, upmixed: upmixed)
         } else {
-            // 使用传统方式播放
             playWithTraditionalEngine(b: b, f: f, autoPlay: autoPlay, upmixed: upmixed)
         }
     }
@@ -446,8 +441,8 @@ class RealtimeUpmixPlayer: ObservableObject {
             var algorithm: UInt32 = 7 // kSpatializationAlgorithm_UseOutputType
             AudioUnitSetProperty(au, kAudioUnitProperty_SpatializationAlgorithm, kAudioUnitScope_Input, 0, &algorithm, UInt32(MemoryLayout<UInt32>.size))
 
-            // 设置源模式为 PointSource（将输入声道作为点声源渲染）
-            var sourceMode: UInt32 = 2 // kSpatialMixerSourceMode_PointSource
+            // 设置源模式为 AmbienceBed（将输入声道作为环境床渲染）
+            var sourceMode: UInt32 = 3 // kSpatialMixerSourceMode_AmbienceBed
             AudioUnitSetProperty(au, kAudioUnitProperty_SpatialMixerSourceMode, kAudioUnitScope_Input, 0, &sourceMode, UInt32(MemoryLayout<UInt32>.size))
 
             // 设置输出类型为耳机

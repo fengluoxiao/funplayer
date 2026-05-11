@@ -1761,6 +1761,9 @@ struct PlaybackSettingsSection: View {
             .onChange(of: enableUpmix51) {
                 if enableUpmix51 {
                     showUpmixAlert = true
+                } else {
+                    // 关闭时恢复音频会话到默认模式
+                    RealtimeUpmixPlayer.shared.disable51Output()
                 }
                 PlayerManager.shared.disableUpmixAndRestart()
             }

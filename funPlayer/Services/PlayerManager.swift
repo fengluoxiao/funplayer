@@ -170,7 +170,15 @@ final class PlayerManager: ObservableObject {
                    let fileSize = attrs[.size] as? Int64 {
                     print("[PlayerManager] Preparing local file: \(localURL.path), size: \(fileSize) bytes")
                 }
-                await setupAudioSession()
+                // 根据文件声道数和设置选择音频会话
+                let enableCustomSpatialAudio = UserDefaults.standard.bool(forKey: "enableUpmix51")
+                let channelCount = getAudioFileChannelCount(url: localURL)
+                let shouldUseUpmix = enableCustomSpatialAudio && channelCount == 2
+                if shouldUseUpmix {
+                    await setupAudioSessionForUpmix()
+                } else {
+                    await setupAudioSessionForDefault()
+                }
                 await setupPlayer(url: localURL, autoPlay: false)
                 // 加载本地封面
                 await loadLocalArtwork(item: item, server: server)
@@ -196,9 +204,25 @@ final class PlayerManager: ObservableObject {
                    let fileSize = attrs[.size] as? Int64 {
                     print("[PlayerManager] Playing local file: \(localURL.path), size: \(fileSize) bytes")
                 }
-                Task {
-                    await setupAudioSession()
-                    await setupPlayer(url: localURL, autoPlay: autoPlay)
+                // 检查是否应该使用自定义空间音频
+                // 只有立体声（2声道）才走上混，多声道直接系统播放
+                let enableCustomSpatialAudio = UserDefaults.standard.bool(forKey: "enableUpmix51")
+                let channelCount = getAudioFileChannelCount(url: localURL)
+                let shouldUseUpmix = enableCustomSpatialAudio && channelCount == 2
+                print("[PlayerManager] Local file channel count: \(channelCount), enableCustom: \(enableCustomSpatialAudio), shouldUseUpmix: \(shouldUseUpmix)")
+                
+                if shouldUseUpmix {
+                    // 使用 RealtimeUpmixPlayer 进行上混处理（启用 moviePlayback 模式）
+                    Task {
+                        await setupAudioSessionForUpmix()
+                        await RealtimeUpmixPlayer.shared.playUpmixed(url: localURL, autoPlay: autoPlay, cleanupAfterProcessing: false)
+                    }
+                } else {
+                    // 使用系统默认播放（恢复 default 模式）
+                    Task {
+                        await setupAudioSessionForDefault()
+                        await setupPlayer(url: localURL, autoPlay: autoPlay)
+                    }
                 }
                 Task {
                     await loadLocalArtwork(item: item, server: server)
@@ -255,6 +279,19 @@ final class PlayerManager: ObservableObject {
         return Int(audioDesc.pointee.mChannelsPerFrame)
     }
 
+    /// 从本地音频文件读取声道数
+    private func getAudioFileChannelCount(url: URL) -> Int {
+        do {
+            let audioFile = try AVAudioFile(forReading: url)
+            let channelCount = Int(audioFile.fileFormat.channelCount)
+            print("[PlayerManager] Audio file channel count: \(channelCount) (url: \(url.lastPathComponent))")
+            return channelCount
+        } catch {
+            print("[PlayerManager] Failed to read audio file channel count: \(error)")
+            return 0
+        }
+    }
+
     private func playCurrentItemAsync(autoPlay: Bool) async {
         guard let item = currentItem, let server = currentServer else { return }
 
@@ -298,7 +335,13 @@ final class PlayerManager: ObservableObject {
 
             print("[PlayerManager] Playing: \(url.absoluteString)")
 
-            await setupAudioSession()
+            // 在线播放也根据设置选择音频会话模式
+            let enableCustomSpatialAudio = UserDefaults.standard.bool(forKey: "enableUpmix51")
+            if enableCustomSpatialAudio {
+                await setupAudioSessionForUpmix()
+            } else {
+                await setupAudioSessionForDefault()
+            }
             await setupPlayer(url: url, autoPlay: autoPlay)
 
             await loadArtwork(item: item, server: server)
@@ -485,26 +528,36 @@ final class PlayerManager: ObservableObject {
 
     // MARK: - Private
 
-    private func setupAudioSession() async {
+    private func setupAudioSessionForUpmix() async {
         #if os(iOS) || os(tvOS) || os(watchOS)
         do {
             let session = AVAudioSession.sharedInstance()
-            let enableUpmix = UserDefaults.standard.bool(forKey: "enableUpmix51")
-
-            // 上混开启时使用 moviePlayback 模式以启用空间音频，关闭时使用 default 模式保持普通立体声
-            let mode: AVAudioSession.Mode = enableUpmix ? .moviePlayback : .default
-            // 音乐播放器需要独占音频会话，才能正确显示锁屏控制、灵动岛和通知中心
-            // 不使用 mixWithOthers，否则系统不会将本App识别为当前音频播放应用
-            try session.setCategory(.playback, mode: mode, options: [])
-
+            try session.setActive(false, options: .notifyOthersOnDeactivation)
+            try session.setCategory(.playback, mode: .moviePlayback, options: [])
             if #available(iOS 15.0, *) {
-                try? session.setSupportsMultichannelContent(enableUpmix)
+                try? session.setSupportsMultichannelContent(true)
             }
-
             try session.setActive(true)
-            print("[PlayerManager] Audio session configured: mode=\(mode.rawValue), multichannel=\(enableUpmix)")
+            print("[PlayerManager] Audio session configured for upmix: mode=moviePlayback, multichannel=true")
         } catch {
-            print("[PlayerManager] Audio session error: \(error)")
+            print("[PlayerManager] Audio session error (upmix): \(error)")
+        }
+        #endif
+    }
+
+    private func setupAudioSessionForDefault() async {
+        #if os(iOS) || os(tvOS) || os(watchOS)
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setActive(false, options: .notifyOthersOnDeactivation)
+            try session.setCategory(.playback, mode: .default, options: [])
+            if #available(iOS 15.0, *) {
+                try? session.setSupportsMultichannelContent(false)
+            }
+            try session.setActive(true)
+            print("[PlayerManager] Audio session configured for default: mode=default, multichannel=false")
+        } catch {
+            print("[PlayerManager] Audio session error (default): \(error)")
         }
         #endif
     }
@@ -518,8 +571,14 @@ final class PlayerManager: ObservableObject {
             playerItem.allowedAudioSpatializationFormats = .monoStereoAndMultichannel
         }
 
-        // 设置音频处理 Tap（EQ）
-        setupAudioProcessingTap(for: playerItem)
+        // 获取文件声道数，只有立体声才设置音频处理 Tap
+        let channelCount = getAudioFileChannelCount(url: url)
+        let isStereo = channelCount == 2
+        if isStereo {
+            setupAudioProcessingTap(for: playerItem)
+        } else {
+            print("[PlayerManager] Multichannel file (\(channelCount)ch), skipping audio processing tap")
+        }
 
         if let existing = player {
             existing.replaceCurrentItem(with: playerItem)
@@ -576,6 +635,12 @@ final class PlayerManager: ObservableObject {
                 guard enableEQ || enableUpmixCompensation else { return }
 
                 let bufferList = UnsafeMutableAudioBufferListPointer(bufferListInOut)
+                let channelCount = bufferList.count
+
+                // 多声道（>2）直接 bypass，不做任何处理
+                guard channelCount == 2 else {
+                    return
+                }
 
                 for (channel, buffer) in bufferList.enumerated() {
                     guard let data = buffer.mData else { continue }
@@ -788,7 +853,12 @@ final class PlayerManager: ObservableObject {
                 // 内存警告时保持音频会话活跃，防止被系统清理
                 if self.isPlaying {
                     Task {
-                        await self.setupAudioSession()
+                        let enableCustomSpatialAudio = UserDefaults.standard.bool(forKey: "enableUpmix51")
+                        if enableCustomSpatialAudio {
+                            await self.setupAudioSessionForUpmix()
+                        } else {
+                            await self.setupAudioSessionForDefault()
+                        }
                     }
                 }
             }
