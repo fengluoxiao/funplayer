@@ -26,8 +26,7 @@ class RealtimeUpmixPlayer: ObservableObject {
     private var progressTimer: Timer?
     private var currentBuffer: AVAudioPCMBuffer?
     private var isUpmixed = false
-    private var environmentNode: AVAudioEnvironmentNode?
-    private var spatialPlayerNodes: [AVAudioPlayerNode] = []
+    private var spatialMixerNode: AVAudioUnit?
 
     private init() {}
 
@@ -381,147 +380,115 @@ class RealtimeUpmixPlayer: ObservableObject {
         let shouldUseSpatialAudio = upmixed || (enableCustomSpatialAudio && isMultichannel)
 
         if shouldUseSpatialAudio {
-            // 使用 AVAudioEnvironmentNode 进行3D空间化（上混或多声道都走这里）
-            playWithEnvironmentNode(b: b, f: f, autoPlay: autoPlay, upmixed: upmixed)
+            // 使用 AUSpatialMixer 进行空间化（Apple 官方推荐方式）
+            playWithSpatialMixer(b: b, f: f, autoPlay: autoPlay, upmixed: upmixed)
         } else {
             // 使用传统方式播放
             playWithTraditionalEngine(b: b, f: f, autoPlay: autoPlay, upmixed: upmixed)
         }
     }
 
-    private func playWithEnvironmentNode(b: AVAudioPCMBuffer, f: AVAudioFormat, autoPlay: Bool, upmixed: Bool) {
+    private func playWithSpatialMixer(b: AVAudioPCMBuffer, f: AVAudioFormat, autoPlay: Bool, upmixed: Bool) {
         let ae = AVAudioEngine()
-        let envNode = AVAudioEnvironmentNode()
-        envNode.renderingAlgorithm = .sphericalHead
+        let pn = AVAudioPlayerNode()
+        ae.attach(pn)
 
-        // === 距离衰减配置：模拟录音棚近场监听 ===
-        let distParams = envNode.distanceAttenuationParameters
-        distParams.distanceAttenuationModel = .inverse
-        distParams.referenceDistance = 1.0   // 1米内不衰减（近场监听标准距离）
-        distParams.maximumDistance = 3.0     // 超过3米后不再衰减
-        distParams.rolloffFactor = 0.1       // 极平缓衰减，接近无衰减
+        // 创建 AUSpatialMixer
+        let componentDescription = AudioComponentDescription(
+            componentType: kAudioUnitType_Mixer,
+            componentSubType: kAudioUnitSubType_SpatialMixer,
+            componentManufacturer: kAudioUnitManufacturer_Apple,
+            componentFlags: 0,
+            componentFlagsMask: 0
+        )
 
-        // === 混响配置：录音棚近场监听环境应极"干" ===
-        let reverbParams = envNode.reverbParameters
-        reverbParams.enable = true
-        // 近场监听要求极低的混响，模拟消声室/录音棚控制室
-        reverbParams.level = -96.0
-
-        ae.attach(envNode)
-        ae.connect(envNode, to: ae.outputNode, format: nil)
-
-        // 从7.1.4 buffer中提取各声道并创建独立的playerNode
-        let channelBuffers = extractChannels(from: b)
-        var players: [AVAudioPlayerNode] = []
-
-        // 根据声道数选择对应的3D位置映射
-        // 坐标系：右手系，+X=右，+Y=上，+Z=前，单位：米
-        // 距离调整：模拟真实家庭影院/耳机近场，扬声器距离0.5-1.0米
-        let positions: [(AVAudio3DPoint, Float)]
-        let channelCount = PlayerManager.shared.getCurrentAudioChannelCount(format: b.format)
-
-        if upmixed || channelCount == 12 {
-            // 7.1.4 布局（上混后的12声道）
-            // 模拟耳机/近场监听：扬声器距离 0.3-0.5 米
-            positions = [
-                (AVAudio3DPoint(x: -0.3, y: 0.0, z: 0.3), 1.0),    // Front Left (0.42m)
-                (AVAudio3DPoint(x: 0.3, y: 0.0, z: 0.3), 1.0),     // Front Right (0.42m)
-                (AVAudio3DPoint(x: 0.0, y: 0.0, z: 0.35), 0.9),    // Center (0.35m)
-                (AVAudio3DPoint(x: 0.0, y: -0.2, z: 0.25), 1.5),   // LFE (下方，0.32m)
-                (AVAudio3DPoint(x: -0.4, y: 0.0, z: 0.0), 0.7),    // Side Left (0.4m)
-                (AVAudio3DPoint(x: 0.4, y: 0.0, z: 0.0), 0.7),     // Side Right (0.4m)
-                (AVAudio3DPoint(x: -0.3, y: 0.0, z: -0.3), 0.6),   // Rear Left (0.42m)
-                (AVAudio3DPoint(x: 0.3, y: 0.0, z: -0.3), 0.6),    // Rear Right (0.42m)
-                (AVAudio3DPoint(x: -0.25, y: 0.3, z: 0.25), 0.5),  // Top Front Left (0.43m)
-                (AVAudio3DPoint(x: 0.25, y: 0.3, z: 0.25), 0.5),   // Top Front Right (0.43m)
-                (AVAudio3DPoint(x: -0.25, y: 0.3, z: -0.25), 0.45), // Top Rear Left (0.43m)
-                (AVAudio3DPoint(x: 0.25, y: 0.3, z: -0.25), 0.45)  // Top Rear Right (0.43m)
-            ]
-        } else if channelCount == 6 {
-            // 5.1 布局
-            positions = [
-                (AVAudio3DPoint(x: -0.3, y: 0.0, z: 0.3), 1.0),    // Front Left
-                (AVAudio3DPoint(x: 0.3, y: 0.0, z: 0.3), 1.0),     // Front Right
-                (AVAudio3DPoint(x: 0.0, y: 0.0, z: 0.35), 0.9),    // Center
-                (AVAudio3DPoint(x: 0.0, y: -0.2, z: 0.25), 1.5),   // LFE
-                (AVAudio3DPoint(x: -0.3, y: 0.0, z: -0.3), 0.6),   // Rear Left
-                (AVAudio3DPoint(x: 0.3, y: 0.0, z: -0.3), 0.6)     // Rear Right
-            ]
-        } else if channelCount == 8 {
-            // 7.1 布局
-            positions = [
-                (AVAudio3DPoint(x: -0.3, y: 0.0, z: 0.3), 1.0),    // Front Left
-                (AVAudio3DPoint(x: 0.3, y: 0.0, z: 0.3), 1.0),     // Front Right
-                (AVAudio3DPoint(x: 0.0, y: 0.0, z: 0.35), 0.9),    // Center
-                (AVAudio3DPoint(x: 0.0, y: -0.2, z: 0.25), 1.5),   // LFE
-                (AVAudio3DPoint(x: -0.4, y: 0.0, z: 0.0), 0.7),    // Side Left
-                (AVAudio3DPoint(x: 0.4, y: 0.0, z: 0.0), 0.7),     // Side Right
-                (AVAudio3DPoint(x: -0.3, y: 0.0, z: -0.3), 0.6),   // Rear Left
-                (AVAudio3DPoint(x: 0.3, y: 0.0, z: -0.3), 0.6)     // Rear Right
-            ]
-        } else {
-            // 其他声道数，按顺序映射到前置位置
-            positions = (0..<channelCount).map { i -> (AVAudio3DPoint, Float) in
-                let angle = Float(i) / Float(channelCount) * 2.0 * .pi
-                let x = sin(angle) * 0.3
-                let z = cos(angle) * 0.3
-                return (AVAudio3DPoint(x: x, y: 0.0, z: z), 1.0)
+        AVAudioUnit.instantiate(with: componentDescription, options: .loadOutOfProcess) { [weak self] avAudioUnit, error in
+            guard let spatialMixer = avAudioUnit else {
+                print("[Upmix] Failed to instantiate SpatialMixer: \(String(describing: error))")
+                // 回退到传统方式
+                self?.playWithTraditionalEngine(b: b, f: f, autoPlay: autoPlay, upmixed: upmixed)
+                return
             }
-        }
 
-        for (index, channelBuf) in channelBuffers.enumerated() {
-            guard index < positions.count else { break }
-            let player = AVAudioPlayerNode()
-            player.position = positions[index].0
-            player.renderingAlgorithm = .sphericalHead
-            player.volume = positions[index].1
-            player.sourceMode = .bypass   // 不应用额外的环境效果
-            ae.attach(player)
-            ae.connect(player, to: envNode, format: channelBuf.format)
-            player.scheduleBuffer(channelBuf, at: nil, options: .loops, completionHandler: nil)
-            players.append(player)
-        }
+            let au = spatialMixer.audioUnit
+            let channelCount = PlayerManager.shared.getCurrentAudioChannelCount(format: b.format)
 
-        do {
-            try ae.start()
-            if autoPlay {
-                players.forEach { $0.play() }
+            // 配置输入声道布局
+            let inputLayoutTag: AudioChannelLayoutTag
+            if upmixed || channelCount == 12 {
+                inputLayoutTag = kAudioChannelLayoutTag_Atmos_7_1_4
+            } else if channelCount == 8 {
+                inputLayoutTag = kAudioChannelLayoutTag_MPEG_7_1_A
+            } else if channelCount == 6 {
+                inputLayoutTag = kAudioChannelLayoutTag_MPEG_5_1_A
+            } else {
+                inputLayoutTag = kAudioChannelLayoutTag_DiscreteInOrder | UInt32(channelCount)
             }
-        } catch {
-            print("[Upmix] EnvironmentNode engine start failed: \(error)")
-            return
-        }
 
-        engine = ae
-        environmentNode = envNode
-        spatialPlayerNodes = players
-        playerNode = players.first
+            var inputLayout = AudioChannelLayout()
+            inputLayout.mChannelLayoutTag = inputLayoutTag
+            inputLayout.mChannelBitmap = AudioChannelBitmap(rawValue: 0)
+            inputLayout.mNumberChannelDescriptions = 0
 
-        let dbLabel = UserDefaults.standard.bool(forKey: "enableVolumeBalance") ? "-10dB" : "0dB"
-        let layoutName = upmixed ? "7.1.4(upmixed)" : (channelCount == 6 ? "5.1" : (channelCount == 8 ? "7.1" : "\(channelCount)ch"))
-        print("[Upmix] Playing with EnvironmentNode \(layoutName), vol=\(dbLabel), refDist=2.0m, rolloff=0.3")
-        startProgressTimer()
-    }
+            let inputLayoutSize = UInt32(MemoryLayout<AudioChannelLayout>.size)
+            AudioUnitSetProperty(au, kAudioUnitProperty_AudioChannelLayout, kAudioUnitScope_Input, 0, &inputLayout, inputLayoutSize)
 
-    private func extractChannels(from buffer: AVAudioPCMBuffer) -> [AVAudioPCMBuffer] {
-        let frameLength = buffer.frameLength
-        let sampleRate = buffer.format.sampleRate
-        var channelBuffers: [AVAudioPCMBuffer] = []
+            // 配置输入格式
+            var inputStreamFormat = b.format.streamDescription.pointee
+            AudioUnitSetProperty(au, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 0, &inputStreamFormat, UInt32(MemoryLayout<AudioStreamBasicDescription>.size))
 
-        for channel in 0..<Int(buffer.format.channelCount) {
-            guard let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1) else { continue }
-            guard let singleChannelBuffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameLength) else { continue }
-            singleChannelBuffer.frameLength = frameLength
+            // 配置输出格式为立体声
+            var outputStreamFormat = b.format.streamDescription.pointee
+            outputStreamFormat.mChannelsPerFrame = 2
+            AudioUnitSetProperty(au, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 0, &outputStreamFormat, UInt32(MemoryLayout<AudioStreamBasicDescription>.size))
 
-            if let srcData = buffer.floatChannelData?[channel],
-               let dstData = singleChannelBuffer.floatChannelData?[0] {
-                for i in 0..<Int(frameLength) {
-                    dstData[i] = srcData[i]
+            // 设置渲染算法为 UseOutputType（让系统根据输出设备自动选择最佳算法）
+            var algorithm: UInt32 = 7 // kSpatializationAlgorithm_UseOutputType
+            AudioUnitSetProperty(au, kAudioUnitProperty_SpatializationAlgorithm, kAudioUnitScope_Input, 0, &algorithm, UInt32(MemoryLayout<UInt32>.size))
+
+            // 设置源模式为 PointSource（将输入声道作为点声源渲染）
+            var sourceMode: UInt32 = 2 // kSpatialMixerSourceMode_PointSource
+            AudioUnitSetProperty(au, kAudioUnitProperty_SpatialMixerSourceMode, kAudioUnitScope_Input, 0, &sourceMode, UInt32(MemoryLayout<UInt32>.size))
+
+            // 设置输出类型为耳机
+            var outputType: UInt32 = 1 // kSpatialMixerOutputType_Headphones
+            AudioUnitSetProperty(au, kAudioUnitProperty_SpatialMixerOutputType, kAudioUnitScope_Global, 0, &outputType, UInt32(MemoryLayout<UInt32>.size))
+
+            // 禁用距离衰减和耳间延迟，减少"远"和"糊"的感觉
+            var renderingFlags: UInt32 = 0
+            AudioUnitSetProperty(au, kAudioUnitProperty_SpatialMixerRenderingFlags, kAudioUnitScope_Global, 0, &renderingFlags, UInt32(MemoryLayout<UInt32>.size))
+
+            // 设置全局混响增益为 -96dB（几乎无混响）
+            AudioUnitSetParameter(au, kSpatialMixerParam_GlobalReverbGain, kAudioUnitScope_Global, 0, -96.0, 0)
+
+            // 设置混响混合为 0
+            AudioUnitSetParameter(au, kSpatialMixerParam_ReverbBlend, kAudioUnitScope_Input, 0, 0.0, 0)
+
+            ae.attach(spatialMixer)
+            ae.connect(pn, to: spatialMixer, format: b.format)
+            ae.connect(spatialMixer, to: ae.outputNode, format: nil)
+
+            pn.scheduleBuffer(b, at: nil, options: .loops, completionHandler: nil)
+
+            do {
+                try ae.start()
+                if autoPlay {
+                    pn.play()
                 }
+            } catch {
+                print("[Upmix] SpatialMixer engine start failed: \(error)")
+                return
             }
-            channelBuffers.append(singleChannelBuffer)
+
+            self?.engine = ae
+            self?.playerNode = pn
+            self?.spatialMixerNode = spatialMixer
+
+            let dbLabel = UserDefaults.standard.bool(forKey: "enableVolumeBalance") ? "-10dB" : "0dB"
+            let layoutName = upmixed ? "7.1.4(upmixed)" : (channelCount == 6 ? "5.1" : (channelCount == 8 ? "7.1" : "\(channelCount)ch"))
+            print("[Upmix] Playing with AUSpatialMixer \(layoutName), vol=\(dbLabel), algorithm=UseOutputType")
+            self?.startProgressTimer()
         }
-        return channelBuffers
     }
 
     private func playWithTraditionalEngine(b: AVAudioPCMBuffer, f: AVAudioFormat, autoPlay: Bool, upmixed: Bool) {
@@ -670,11 +637,9 @@ class RealtimeUpmixPlayer: ObservableObject {
 
     func stop() {
         stopProgressTimer()
-        spatialPlayerNodes.forEach { $0.stop() }
-        spatialPlayerNodes = []
         playerNode?.stop(); engine?.stop()
         engine = nil; playerNode = nil; volumeMixer = nil; eqNode = nil
-        environmentNode = nil
+        spatialMixerNode = nil
         currentBuffer = nil
         isUpmixed = false
         currentTime = 0; duration = 0
