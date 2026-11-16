@@ -9,8 +9,6 @@
 /* Begin PBXBuildFile section */
 		214E46CD2F9DA07D006793F2 /* AVRouting.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 214E46CC2F9DA07D006793F2 /* AVRouting.framework */; };
 		215545792F9E4B7E004C065D /* LNPopupUI-Static in Frameworks */ = {isa = PBXBuildFile; productRef = 215545782F9E4B7E004C065D /* LNPopupUI-Static */; };
-		21632F1C2FA123FB0066AD4E /* (null) in Frameworks */ = {isa = PBXBuildFile; };
-		21632F1E2FA123FB0066AD4E /* (null) in Frameworks */ = {isa = PBXBuildFile; };
 		216872852FAF8A0800A6006A /* FFmpeg-iOS in Frameworks */ = {isa = PBXBuildFile; productRef = 216872842FAF8A0800A6006A /* FFmpeg-iOS */; };
 		216EEDC02F9D3316004DEA56 /* AVFAudio.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 216EEDBE2F9D3313004DEA56 /* AVFAudio.framework */; };
 		216EEDC32F9D3317004DEA56 /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 216EEDBA2F9D3301004DEA56 /* AVFoundation.framework */; };
@@ -18,11 +16,11 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		214E46CC2F9DA07D006793F2 /* AVRouting.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVRouting.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.4.sdk/System/Library/Frameworks/AVRouting.framework; sourceTree = DEVELOPER_DIR; };
+		214E46CC2F9DA07D006793F2 /* AVRouting.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVRouting.framework; path = System/Library/Frameworks/AVRouting.framework; sourceTree = SDKROOT; };
 		216EECC22F9D1465004DEA56 /* funPlayer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = funPlayer.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		216EEDBA2F9D3301004DEA56 /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.4.sdk/System/Library/Frameworks/AVFoundation.framework; sourceTree = DEVELOPER_DIR; };
-		216EEDBC2F9D330C004DEA56 /* AVKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVKit.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.4.sdk/System/Library/Frameworks/AVKit.framework; sourceTree = DEVELOPER_DIR; };
-		216EEDBE2F9D3313004DEA56 /* AVFAudio.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFAudio.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.4.sdk/System/Library/Frameworks/AVFAudio.framework; sourceTree = DEVELOPER_DIR; };
+		216EEDBA2F9D3301004DEA56 /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = System/Library/Frameworks/AVFoundation.framework; sourceTree = SDKROOT; };
+		216EEDBC2F9D330C004DEA56 /* AVKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVKit.framework; path = System/Library/Frameworks/AVKit.framework; sourceTree = SDKROOT; };
+		216EEDBE2F9D3313004DEA56 /* AVFAudio.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFAudio.framework; path = System/Library/Frameworks/AVFAudio.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -38,12 +36,10 @@
 			isa = PBXFrameworksBuildPhase;
 			files = (
 				215545792F9E4B7E004C065D /* LNPopupUI-Static in Frameworks */,
-				21632F1C2FA123FB0066AD4E /* (null) in Frameworks */,
 				216EEDC02F9D3316004DEA56 /* AVFAudio.framework in Frameworks */,
 				216EEDC32F9D3317004DEA56 /* AVFoundation.framework in Frameworks */,
 				214E46CD2F9DA07D006793F2 /* AVRouting.framework in Frameworks */,
 				216EEDC52F9D3319004DEA56 /* AVKit.framework in Frameworks */,
-				21632F1E2FA123FB0066AD4E /* (null) in Frameworks */,
 				216872852FAF8A0800A6006A /* FFmpeg-iOS in Frameworks */,
 			);
 		};

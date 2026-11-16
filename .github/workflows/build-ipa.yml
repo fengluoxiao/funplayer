@@ -1,0 +1,68 @@
+name: Build iOS IPA
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/build-ipa.yml'
+      - 'scripts/build-ipa.sh'
+      - 'funPlayer/**'
+      - 'funPlayer.xcodeproj/**'
+      - 'Info.plist'
+  pull_request:
+    paths:
+      - '.github/workflows/build-ipa.yml'
+      - 'scripts/build-ipa.sh'
+      - 'funPlayer/**'
+      - 'funPlayer.xcodeproj/**'
+      - 'Info.plist'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-ipa-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Unsigned IPA (macOS 27 / Xcode 27)
+    # GitHub calls its macOS 27 image xcode-27, not macos-27.
+    runs-on: xcode-27
+    timeout-minutes: 45
+    env:
+      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Show build environment
+        run: |
+          sw_vers
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Build and package IPA
+        run: bash scripts/build-ipa.sh
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: funPlayer-unsigned-ipa
+          path: build/funPlayer-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-build-diagnostics
+          path: |
+            build/*.log
+            build/*.xcresult
+          if-no-files-found: warn
+          retention-days: 7
