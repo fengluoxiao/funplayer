@@ -77,3 +77,23 @@ funPlayer/
 ---
 
 ## 开源协议
+
+---
+
+## GitHub Actions 打包 IPA
+
+工作流为 `.github/workflows/build-ipa.yml`，使用 GitHub 官方的 `xcode-27`
+runner（macOS 27 / Xcode 27，当前为公开预览版）。
+项目仍保持 iOS 26.4 的部署目标，构建 SDK 跟随 runner 中的 Xcode。
+
+- 推送 iOS 源码、Xcode 工程或构建配置后自动打包，Pull Request 也会构建。
+- 工作流合并到默认分支后，也可在 **Actions → Build iOS IPA → Run workflow** 手动触发。
+- 构建成功后，在该次运行的 **Artifacts** 中下载 `funPlayer-unsigned-ipa`。
+  解压下载的 ZIP，即可获得 `funPlayer-unsigned.ipa`。
+- 产物为 **arm64 真机未签名 IPA**，无需配置 Apple 证书或 GitHub Secrets。
+  安装前须使用自己的证书及描述文件签名；不能直接提交 TestFlight 或 App Store。
+- IPA 保留 14 天；构建日志和 Xcode 结果包保留 7 天，供失败排查。
+
+在安装 Xcode 27 的 Mac 上，也可以执行 `bash scripts/build-ipa.sh`，
+产物位于 `build/funPlayer-unsigned.ipa`。重复构建前需移走或清理之前的
+`build/Build.xcresult` 和归档、打包目录。
